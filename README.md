@@ -1,16 +1,18 @@
 # diaryze
 
-Распознаёт речь в телефонных звонках и диктофонных записях, разделяет голоса и сохраняет по одному Markdown-файлу на запись. В MD есть таймкоды, реплики с именами или ролями, краткое содержание и связи со справочниками. Формат 1.0 описан в [docs/formats.md](docs/formats.md).
+English · [Русский](README.ru.md)
 
-Код удобнее хранить отдельно от аудио. У каждого архива свои расшифровки, справочники и журнал. Их можно переносить вместе с записями.
+Transcribe phone calls and voice recordings, identify who spoke when, and save one searchable Markdown file per recording. Each transcript contains timestamped utterances with speaker names or roles, a short summary, and links to people or organizations. See the [format 1.0 specification (Russian)](docs/formats.md).
 
-## Установка
+Keep the code in its own checkout. Each audio archive holds its own transcripts, catalogs, and processing history, so they can move with the recordings.
 
-- Linux и Python 3.11 или новее.
-- `ffmpeg` и `ffprobe` доступны в `PATH`. Для восстановления повреждённых записей можно дополнительно установить `libfaad2` и `untrunc`.
-- Установлен [Google Antigravity CLI](https://antigravity.google/docs/getting-started) (`agy`). Запустите `agy` для входа в аккаунт. Для обработки у аккаунта должен быть доступ к выбранным моделям.
+## Installation
 
-Клонируйте репозиторий и установите пакет в отдельное окружение.
+- Linux with Python 3.11 or later.
+- `ffmpeg` and `ffprobe` from [FFmpeg](https://ffmpeg.org/download.html) on `PATH`.
+- [Google Antigravity CLI](https://antigravity.google/docs/getting-started) (`agy`). Run `agy` to sign in and make sure your account can use the models you select.
+- PyYAML is required to read and write transcript metadata and catalogs. The installation below installs it into a virtual environment.
+- `libfaad2` and `untrunc` are optional [audio recovery tools](#audio-recovery).
 
 ```bash
 git clone https://github.com/sukamenev/diaryze.git
@@ -20,39 +22,59 @@ source .venv/bin/activate
 python -m pip install .
 ```
 
-С активированным окружением можно запустить `diaryze` из папки с аудио или передать её путь.
+## Usage
+
+With the environment activated, run `diaryze` from the folder containing your recordings. Use `--dry-run` to inspect the queue, then try a few files.
 
 ```bash
-cd "/путь/к/записям"
+cd "/path/to/recordings"
 diaryze --dry-run
 diaryze --workers 2 --limit 5
 ```
 
-```bash
-diaryze --folder "/путь/к/записям" --workers 2
-```
-
-Из исходников можно запустить `python3 /путь/к/diaryze/scripts/diarize.py` с теми же параметрами, если установлен PyYAML. Скрипт обходит подпапки. Если нужны результаты для одной подпапки в общем `Text/`, передайте оба параметра.
+To run from another directory, pass the archive path.
 
 ```bash
-diaryze --root "/путь/к/записям" --folder Phone/2025
+diaryze --folder "/path/to/recordings" --workers 2
 ```
 
-Если нужны свои модели, `--models model-a,model-b` задаёт порядок, а `--models model-a` запускает единственную модель. `--model` задаёт первую модель с резервами из конфигурации. Короткие записи отправляются группами. Длинные режутся на части с перекрытием, а таймкоды пересчитываются для исходной записи. Повторный запуск пропускает готовые MD с совпадающим хешем исходника.
+To process a single subfolder while keeping the output in the shared archive root, pass both options.
 
-По опыту автора, **5 часов квоты Antigravity хватало примерно на 18–26 часов разговоров**. Результат зависит от моделей, записей, повторных запросов и числа работников.
+```bash
+diaryze --root "/path/to/recordings" --folder Phone/2025
+```
 
-`agy` отправляет обрабатываемое аудио и контекст распознавания поставщику модели. MD, справочники и диагностические журналы хранятся в локальном архиве. Журналы могут содержать текст ответов модели.
+If PyYAML is already available to your Python, you can also run `python3 /path/to/diaryze/scripts/diarize.py` with the same arguments.
 
-## Что создаётся в архиве
+`--models model-a,model-b` sets the full model chain. Use `--models model-a` for a single model. `--model` sets the first model and adds the configured fallbacks. Short recordings can share a request. Long recordings are split into overlapping parts, and their timestamps are mapped back to the original recording. Reruns skip completed transcripts whose source audio hash matches.
+
+In the author's runs, **five hours of Antigravity quota covered roughly 18–26 hours of recorded conversations**. This varies with model choice, the recordings, retries, and the number of workers.
+
+`agy` sends the audio being processed and its transcription context to the model provider. Transcripts, catalogs, and logs are stored in the local archive. Diagnostic logs can contain model responses.
+
+## Audio recovery
+
+| Condition | What diaryze does |
+| --- | --- |
+| FFprobe can read the audio stream and its duration | FFmpeg copies the first audio stream into a clean container. If stream copy fails, diaryze tries to decode the stream into WAV. |
+| FFprobe cannot open an unfinished container, for example `moov atom not found` | For eligible files, diaryze first tries to recover AAC frames with [FAAD2](https://github.com/knik0/faad2). FFmpeg builds a new container from the recovered frames. |
+| AAC recovery fails | If `untrunc` is on `PATH`, diaryze tries a playable M4A or MP4 in the same folder as a reference. A sample from the same device with the same settings is a better match. |
+
+**Use `libfaad2` for AAC recovery without `untrunc`.** On [Debian](https://packages.debian.org/trixie/libfaad2), install it with `sudo apt install libfaad2`. diaryze loads `libfaad.so.2` directly, so the separate `faad` executable is unnecessary. Recovery depends on how much of the AAC data survived. FFmpeg stream copy alone may be insufficient when the container index is missing.
+
+If your distribution has no `untrunc` package, [anthwlock/untrunc](https://github.com/anthwlock/untrunc#building) has build instructions and a Docker option for manual recovery. For automatic recovery, diaryze needs an `untrunc` executable on `PATH` that supports `-dst`.
+
+Recovery works on temporary files and preserves the original recording. Run `--selftest` to see which recovery tools are available. Use `--no-faad` or `--no-untrunc` to disable a recovery method.
+
+## Archive layout
 
 ```text
-записи/
-├── Phone/2025/звонок.m4a
-├── Recordings/заметка.wav
+recordings/
+├── Phone/2025/call.m4a
+├── Recordings/memo.wav
 ├── Text/
-│   ├── Phone/2025/звонок.m4a.md
-│   └── Recordings/заметка.wav.md
+│   ├── Phone/2025/call.m4a.md
+│   └── Recordings/memo.wav.md
 ├── docs/
 │   ├── people.yaml
 │   ├── orgs.yaml
@@ -60,11 +82,11 @@ diaryze --root "/путь/к/записям" --folder Phone/2025
 └── work/logs/
 ```
 
-Итоговый MD повторяет путь исходника под `Text/` и сохраняет расширение аудио. Исходник остаётся в своей папке. `manifest.jsonl` хранит историю обработки, а `work/logs/` помогает разобрать ошибки.
+The output mirrors each source path under `Text/`, keeping the audio extension. `manifest.jsonl` records processing history, and `work/logs/` contains diagnostic logs.
 
-## Справочник людей
+## People and organizations
 
-При первом обычном запуске создаются пустые `docs/people.yaml` и `docs/orgs.yaml`. Если хочется внести известных людей до распознавания, выполните `diaryze --folder "/путь/к/записям" --init` и заполните YAML. Уже существующие справочники сохраняются. Ниже вымышленная карточка человека.
+The first processing run creates empty `docs/people.yaml` and `docs/orgs.yaml` if needed. To fill them in before processing, run `diaryze --folder "/path/to/recordings" --init` and edit the YAML. The command preserves existing catalogs. Here is a fictional example.
 
 ```yaml
 schema_version: "1.0"
@@ -75,7 +97,7 @@ people:
     tags: [owner]
 ```
 
-Для настройки владельца записывающего телефона сохраните следующий пример как `.owner` в папке звонков.
+Create a `.owner` file in a folder of calls to identify the owner of the recording phone.
 
 ```yaml
 type: phone
@@ -83,37 +105,39 @@ owner: ivanov_ivan
 label: Иван
 ```
 
-`owner` ссылается на ID из `people.yaml`. Ближайший `.owner` действует на подпапки, поэтому можно настроить разные телефоны. Непривязанные голоса остаются в расшифровке с `person: null`.
+`owner` refers to an ID in `people.yaml`. The nearest `.owner` applies to nested folders, so different phones can have different owners. Unidentified speakers retain `person: null`.
 
-Во время обработки модель предлагает привязки по контакту и номеру из имени файла, справочнику и сведениям из речи. При достаточных основаниях скрипт добавляет карточку человека или организации и сверяет её с уже известными именами и номерами. Разовые собеседники могут отмечаться `temp: true` без новой карточки. Автоматические привязки можно проверить и уточнить вручную. ID карточки лучше сохранять, потому что на него ссылаются готовые MD.
+As diaryze processes recordings, it uses filenames, phone numbers, the existing catalogs, and evidence from speech to suggest speaker links. It can add people or organizations when there is enough evidence and checks new entries against known names and numbers. A one-off participant can be marked `temp: true` without a catalog entry. You can review and correct automatic links. Keep IDs stable because transcripts refer to them.
 
-## Поиск и другие скрипты
+## Search and other scripts
 
-Из папки архива указывайте полный путь к скриптам из клона. Для `find.py` можно также передать `--root`.
+Run the scripts from the archive using their paths in the checkout. `find.py` also accepts `--root`.
 
 ```bash
-python3 /путь/к/diaryze/scripts/find.py --text 'договор|оплат[ауы]' --limit 20
-python3 /путь/к/diaryze/scripts/find.py --person ivanov_ivan --from 2025-01-01
-python3 /путь/к/diaryze/scripts/find.py --root "/путь/к/записям" --folder Phone/2025 --direction in --format paths
+python3 /path/to/diaryze/scripts/find.py --text 'contract|договор' --limit 20
+python3 /path/to/diaryze/scripts/find.py --person ivanov_ivan --from 2025-01-01
+python3 /path/to/diaryze/scripts/find.py --root "/path/to/recordings" --folder Phone/2025 --direction in --format paths
 ```
 
-| Скрипт | Для чего нужен |
+| Script | Purpose |
 | --- | --- |
-| [diarize.py](scripts/diarize.py) | Основной обработчик и исходный эквивалент команды `diaryze`. |
-| [find.py](scripts/find.py) | Поиск по речи и краткому содержанию, участникам, организациям, номерам, датам и длительности. Выводит таблицу, пути MD или аудио, либо JSONL. |
-| [find_audio_duplicates.py](scripts/find_audio_duplicates.py) | Находит побайтовые копии аудио и сохраняет отчёт. |
-| [audit_recording_dates.py](scripts/audit_recording_dates.py) | Сверяет даты в имени, метаданных и времени изменения аудио. Изменение дат требует подготовленного плана и явного `--apply`. |
-| [sync_md_dates.py](scripts/sync_md_dates.py) | Сверяет время изменения MD с датой записи. `--apply` синхронизирует. |
-| [relink_catalog_speakers.py](scripts/relink_catalog_speakers.py) | Проверяет, можно ли связать непривязанный голос в готовом MD с существующей карточкой. |
-| [migrate_identification.py](scripts/migrate_identification.py), [migrate_phone_owners.py](scripts/migrate_phone_owners.py), [migrate_catalog_fields.py](scripts/migrate_catalog_fields.py) | Проверяют и при необходимости обновляют старые MD. По умолчанию показывают план, `--apply` записывает изменения. |
+| [diarize.py](scripts/diarize.py) | Main processor and source checkout equivalent of `diaryze`. |
+| [find.py](scripts/find.py) | Search speech and summaries, filter by people, organizations, phone numbers, dates, or duration, and output a table, Markdown paths, audio paths, or JSONL. |
+| [find_audio_duplicates.py](scripts/find_audio_duplicates.py) | Find byte-for-byte duplicate audio and write a report. |
+| [audit_recording_dates.py](scripts/audit_recording_dates.py) | Compare dates from filenames, metadata, and audio modification times. Applying changes requires a prepared plan and `--apply`. |
+| [sync_md_dates.py](scripts/sync_md_dates.py) | Compare Markdown modification times with recording dates. Use `--apply` to sync them. |
+| [relink_catalog_speakers.py](scripts/relink_catalog_speakers.py) | Check whether unidentified voices in existing transcripts can be linked to catalog entries. |
+| [migrate_identification.py](scripts/migrate_identification.py), [migrate_phone_owners.py](scripts/migrate_phone_owners.py), [migrate_catalog_fields.py](scripts/migrate_catalog_fields.py) | Preview updates to existing transcripts. Use `--apply` to write the updates. |
 
-Значения по умолчанию и правила переключения моделей находятся в [config.py](scripts/diarizer/config.py). Английские задания для модели находятся в [promts/](scripts/diarizer/promts/README.md). Реплики сохраняются на языке записи, краткое содержание формируется по-русски.
+Defaults and model fallback policies are in [config.py](scripts/diarizer/config.py). Model instructions are in [promts/](scripts/diarizer/promts/README.md). Speech stays in the original language. Short summaries are written in Russian.
+
+From the checkout with the package installed, run the offline checks.
 
 ```bash
 diaryze --selftest
 python3 -m unittest discover -s scripts/tests -q
 ```
 
-Тесты запускаются из клона репозитория с установленным проектом. Они используют подставные ответы и синтетическое аудио.
+The tests use synthetic audio and mock model responses.
 
-Лицензия [MIT](LICENSE).
+[MIT license](LICENSE)
