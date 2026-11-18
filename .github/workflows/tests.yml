@@ -21,11 +21,19 @@ jobs:
         with:
           python-version: "3.13"
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg libfaad2
+        timeout-minutes: 3
+        run: sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 install -y --no-install-recommends ffmpeg libfaad2
       - if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
         run: brew install ffmpeg faad2
       - run: python -m pip install .
       - name: Check native AAC recovery is available
         run: python -c 'from diarizer.audio import _get_libfaad; assert _get_libfaad(), "FAAD2 was not loaded"'
       - run: diaryze --selftest
-      - run: python -m unittest discover -s scripts/tests -q
+      - name: Recover a synthetic M4A without untrunc
+        timeout-minutes: 1
+        run: python -m unittest scripts.tests.test_diarizer.AudioTests.test_truncated_aac_needs_recovery_without_tools_and_recovers_with_faad -v
+      - name: Run the full suite
+        timeout-minutes: 2
+        run: python -m unittest discover -s scripts/tests -v

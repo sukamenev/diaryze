@@ -33,7 +33,7 @@ class TemporaryArchive(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(prefix="diarizer-test-")
         self.addCleanup(tmp.cleanup)
-        self.root = Path(tmp.name)
+        self.root = Path(tmp.name).resolve()
         self.manifest = self.root / "docs/manifest.jsonl"
         patch = mock.patch.object(config, "ROOT", str(self.root))
         patch.start()

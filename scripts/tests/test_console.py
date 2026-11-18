@@ -262,17 +262,31 @@ class LiveConsoleTests(unittest.TestCase):
         self.addCleanup(os.close, master)
         self.addCleanup(os.close, slave)
         termios.tcsetwinsize(slave, (24, 300))
+        os.set_blocking(master, False)
+        output = bytearray()
+
+        def drain():
+            while select.select([master], [], [], 0.05)[0]:
+                try:
+                    chunk = os.read(master, 65536)
+                except BlockingIOError:
+                    break
+                if not chunk:
+                    break
+                output.extend(chunk)
+
         with os.fdopen(os.dup(slave), 'w') as stdout, os.fdopen(os.dup(slave), 'w') as stderr:
             with mock.patch.dict(os.environ, {'TERM': 'xterm'}, clear=True), \
                     contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), console.progress_output():
                 console.completed(self.item, self.meta, self.stats)
+                drain()
                 console.emit('[ERR] Visible error', file=stderr)
+                drain()
                 self.stats.update(done=2)
                 console.completed(self.item, self.meta, self.stats)
+                drain()
                 console.emit(console.render_finished(self.stats), final=True)
-        output = bytearray()
-        while select.select([master], [], [], 0)[0]:
-            output.extend(os.read(master, 65536))
+                drain()
         lines = screen_lines(output.decode())
         self.assertEqual(sum('example.m4a.md' in line for line in lines), 2)
         self.assertEqual(sum('[ERR] Visible error' in line for line in lines), 1)
