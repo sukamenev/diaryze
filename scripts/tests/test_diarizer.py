@@ -322,6 +322,62 @@ class PipelineTests(TemporaryArchive):
 
 class AudioTests(TemporaryArchive):
     @unittest.skipUnless(shutil.which("ffprobe") and shutil.which("ffmpeg"), "ffmpeg/ffprobe required")
+    def test_truncated_aac_needs_recovery_without_tools_and_recovers_with_faad(self):
+        reference = self.item("reference.m4a")
+        generated = processes.run_capture([
+            "ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+            "sine=frequency=440:sample_rate=44100:duration=2",
+            "-c:a", "aac", reference["audio_abs"],
+        ], timeout=15)
+        self.assertEqual(generated.returncode, 0, generated.stderr)
+        data = Path(reference["audio_abs"]).read_bytes()
+        size = 0
+        while size < len(data) and data[size + 4:size + 8] != b"moov":
+            box_size = int.from_bytes(data[size:size + 4], "big")
+            self.assertGreaterEqual(box_size, 8)
+            size += box_size
+        self.assertEqual(data[size + 4:size + 8], b"moov")
+        item = self.item("interrupted.m4a")
+        path = Path(item["audio_abs"])
+        path.write_bytes(data[:size])
+        digest = archive.sha256_file(str(path))
+        args = SimpleNamespace(max_single_sec=20, chunk_sec=10, overlap_sec=0,
+                               use_faad=False, untrunc_bin=None)
+        stats = pipeline.Stats()
+        with mock.patch.object(pipeline, "run_agy") as run_agy, contextlib.redirect_stdout(io.StringIO()):
+            pipeline.run_job([item], args, stats)
+        run_agy.assert_not_called()
+        failed = archive.load_manifest_state()[item["audio_rel"]]
+        self.assertEqual(failed["status"], "needs_recovery")
+        self.assertEqual(failed["sha256"], digest)
+        self.assertIn("moov atom not found", failed["reason"])
+        self.assertEqual(stats.snapshot()["needs_recovery"], 1)
+        self.assertFalse(Path(item["target_md"]).exists())
+        self.assertNotIn(item["audio_rel"], {f["audio_rel"] for f in archive.scan_pending()})
+        self.assertIn(item["audio_rel"], {f["audio_rel"] for f in archive.scan_pending(retry_recovery=True)})
+
+        if audio._get_libfaad():
+            work = self.root / "recover"
+            work.mkdir()
+            ready, error = audio.prepare_audio_work(item, str(work), 20, 10, 0, untrunc_bin=None)
+            self.assertIsNone(error)
+            self.assertAlmostEqual(ready["duration_ms"], 2000, delta=200)
+            self.assertEqual(ready["sha256"], digest)
+        self.assertEqual(archive.sha256_file(str(path)), digest)
+
+        path.write_bytes(data)
+        self.assertIn(item["audio_rel"], {f["audio_rel"] for f in archive.scan_pending()})
+
+    def test_retry_recovery_includes_legacy_damage_but_not_empty_inputs(self):
+        broken = self.item("broken.m4a")
+        empty = self.item("empty.m4a")
+        for item, reason in ((broken, "moov atom not found"), (empty, "empty_file")):
+            archive.append_manifest({"audio": item["audio_rel"], "status": "skipped", "reason": reason})
+        self.assertEqual(archive.scan_pending(), [])
+        retried = archive.scan_pending(retry_recovery=True)
+        self.assertEqual([f["audio_rel"] for f in retried], [broken["audio_rel"]])
+
+    @unittest.skipUnless(shutil.which("ffprobe") and shutil.which("ffmpeg"), "ffmpeg/ffprobe required")
     def test_video_uses_only_audio_and_silent_video_is_rejected(self):
         for sound in (False, True):
             with self.subTest(audio=sound):

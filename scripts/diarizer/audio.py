@@ -1,10 +1,14 @@
 """Audio probing, container/AAC recovery, remuxing and slicing."""
 
 import ctypes
+from ctypes.util import find_library
 import json
 import os
+from pathlib import Path
 import shutil
 import struct
+import subprocess
+import sys
 import threading
 
 from .archive import sha256_file
@@ -105,10 +109,13 @@ def untrunc_recover(fp: str, tmp_dir: str, untrunc_bin: str | None) -> tuple[str
 
     for ridx, ref in enumerate(refs):
         out_m4a = os.path.join(tmp_dir, f"untrunc_out_{ridx}.m4a")
-        run_capture(
-            [untrunc_bin, "-n", "-s", "-q", "-dst", out_m4a, ref, src_for_untrunc],
-            capture_output=True, text=True, timeout=120,
-        )
+        try:
+            run_capture(
+                [untrunc_bin, "-n", "-s", "-q", "-dst", out_m4a, ref, src_for_untrunc],
+                capture_output=True, text=True, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            continue
         if os.path.exists(out_m4a) and os.path.getsize(out_m4a) > 1024:
             ms, err = probe_duration_ms(out_m4a)
             if not err and ms and ms > 0:
@@ -142,15 +149,39 @@ _FAAD_LOCK = threading.Lock()
 _FAAD_LIB = [None, False]  # [lib_or_none, attempted]
 
 
+def _faad_library_names():
+    if sys.platform != "darwin":
+        yield from ("libfaad.so.2", "libfaad.so")
+        return
+    names = ("libfaad.2.dylib", "libfaad.dylib")
+    for prefix in ("/opt/homebrew", "/usr/local"):
+        for name in names:
+            path = Path(prefix) / "opt" / "faad2" / "lib" / name
+            if path.is_file():
+                yield str(path)
+    if brew := shutil.which("brew"):
+        try:
+            result = subprocess.run([brew, "--prefix", "faad2"], capture_output=True,
+                                    text=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            result = None
+        if result and result.returncode == 0 and result.stdout.strip():
+            for name in names:
+                yield str(Path(result.stdout.strip()) / "lib" / name)
+    if library := find_library("faad"):
+        yield library
+    yield from names
+
+
 def _get_libfaad():
-    """Lazily load libfaad.so.2 once with ctypes signatures."""
+    """Lazily load the FAAD2 shared library with ctypes signatures."""
     if _FAAD_LIB[1]:
         return _FAAD_LIB[0]
     with _FAAD_LOCK:
         if _FAAD_LIB[1]:
             return _FAAD_LIB[0]
         _FAAD_LIB[1] = True
-        for name in ("libfaad.so.2", "libfaad.so"):
+        for name in _faad_library_names():
             try:
                 lib = ctypes.CDLL(name)
                 lib.NeAACDecOpen.restype = ctypes.c_void_p
@@ -170,9 +201,10 @@ def _get_libfaad():
                 ]
                 lib.NeAACDecDecode.restype = ctypes.c_void_p
                 lib.NeAACDecClose.argtypes = [ctypes.c_void_p]
+                lib.NeAACDecClose.restype = None
                 _FAAD_LIB[0] = lib
                 break
-            except OSError:
+            except (OSError, AttributeError):
                 continue
         return _FAAD_LIB[0]
 

@@ -9,7 +9,7 @@ import threading
 import yaml
 
 from . import config
-from .config import AUDIO_EXTENSIONS, EXCLUDED_DIRS, EXCLUDED_FILES, TRANSCRIPT_SCHEMA_VERSION, TZ
+from .config import AUDIO_EXTENSIONS, EXCLUDED_DIRS, EXCLUDED_FILES, NEEDS_RECOVERY, NO_RECOVERABLE_AUDIO, TRANSCRIPT_SCHEMA_VERSION, TZ
 
 
 MANIFEST_LOCK = threading.Lock()
@@ -364,7 +364,8 @@ def md_has_matching_sha(md_path: str, audio_sha: str) -> bool:
         return False
 
 
-def scan_pending(subdir: str = ".", retry_skipped: bool = False, retry_refused: bool = False):
+def scan_pending(subdir: str = ".", retry_skipped: bool = False, retry_refused: bool = False,
+                 *, retry_recovery: bool = False):
     """Scan subdir newest-first for audio files without a matching MD or terminal status."""
     src_root = resolve_source_dir(subdir)
     mstate = load_manifest_state()
@@ -382,7 +383,13 @@ def scan_pending(subdir: str = ".", retry_skipped: bool = False, retry_refused: 
             prev = mstate.get(rel)
             st = (prev or {}).get("status")
             if st == "skipped" and not retry_skipped:
-                continue
+                reason = prev.get("reason")
+                if not (retry_recovery and reason and reason not in NO_RECOVERABLE_AUDIO):
+                    continue
+            if st == NEEDS_RECOVERY and not retry_recovery:
+                previous_sha = prev.get("sha256")
+                if not previous_sha or sha256_file(fp) == previous_sha:
+                    continue
             if st == "refused" and not retry_refused:
                 continue
             md_path = os.path.join(config.ROOT, "Text", rel + ".md")

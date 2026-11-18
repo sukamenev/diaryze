@@ -20,6 +20,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def running(pid):
+    if sys.platform == "darwin":
+        status = subprocess.run(["ps", "-o", "state=", "-p", str(pid)], capture_output=True, text=True)
+        return status.returncode == 0 and bool(status.stdout.strip()) and not status.stdout.strip().startswith("Z")
     try:
         state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
         return state != "Z"

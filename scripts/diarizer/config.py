@@ -58,6 +58,8 @@ BACKEND_RETRY_MAX_S = 300
 PROMPTS_DIR = Path(__file__).with_name("promts")
 
 TRANSCRIPT_SCHEMA_VERSION = "1.0"
+NEEDS_RECOVERY = "needs_recovery"
+NO_RECOVERABLE_AUDIO = {"empty_file", "no_audio_stream"}
 
 
 TZ = timezone(timedelta(hours=3))

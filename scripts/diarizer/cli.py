@@ -51,6 +51,8 @@ def main():
     ap.add_argument("--no-untrunc", action="store_true", help="Disable automatic untrunc fallback for damaged containers")
     ap.add_argument("--no-faad", action="store_true", help="Disable libfaad2 raw AAC frame recovery")
     ap.add_argument("--retry-skipped", action="store_true", help="Re-try files previously marked status=skipped in manifest.jsonl")
+    ap.add_argument("--retry-recovery", action="store_true",
+                    help="Retry files marked needs_recovery and legacy damaged files marked skipped")
     ap.add_argument("--retry-refused", action="store_true", help="Re-try files previously marked status=refused in manifest.jsonl")
     ap.add_argument("--stop-on-quota", action="store_true", help="Exit on quota exhaustion instead of sleeping")
     ap.add_argument("--max-file-attempts", type=int, default=MAX_FILE_ATTEMPTS,
@@ -124,7 +126,8 @@ def _run(args):
 
 
 def run_workers(args):
-    cands = scan_pending(args.subdir, retry_skipped=args.retry_skipped, retry_refused=args.retry_refused)
+    cands = scan_pending(args.subdir, retry_skipped=args.retry_skipped, retry_refused=args.retry_refused,
+                         retry_recovery=getattr(args, "retry_recovery", False))
     if args.limit > 0:
         cands = cands[: args.limit]
     faad_state = "ok" if args.use_faad else ("disabled" if args.no_faad else "missing")

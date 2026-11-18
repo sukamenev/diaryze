@@ -12,7 +12,7 @@ from .agy import agy_forget, extract_envelope_error_and_usage, run_agy
 from .archive import append_manifest, load_refs, publish_md, register_catalog_entries, sha256_file
 from .audio import prepare_audio_work, probe_duration_ms
 from .config import (
-    BACKEND_RETRY_BASE_S, BACKEND_RETRY_MAX_S, PART_REPAIR_ATTEMPTS,
+    BACKEND_RETRY_BASE_S, BACKEND_RETRY_MAX_S, NEEDS_RECOVERY, NO_RECOVERABLE_AUDIO, PART_REPAIR_ATTEMPTS,
     REFUSAL_TEXT_PAT, SAFETY_ERR_PAT, TZ,
 )
 from .models import ModelAttempts, ModelCooldowns
@@ -64,6 +64,7 @@ class Stats:
         self.pending_count = pending_count
         self.done = 0
         self.skipped = 0
+        self.needs_recovery = 0
         self.refused = 0
         self.errors = 0
         self.tok_in = 0
@@ -105,7 +106,8 @@ class Stats:
     def _snapshot(self):
         return {
             "done": self.done, "audio_ms": self.audio_ms,
-            "skipped": self.skipped, "refused": self.refused, "errors": self.errors,
+            "skipped": self.skipped, "needs_recovery": self.needs_recovery,
+            "refused": self.refused, "errors": self.errors,
             "tok_in": self.tok_in, "tok_cache": self.tok_cache, "tok_out": self.tok_out,
             "elapsed_s": time.monotonic() - self.started_at,
             "remaining": self.pending_count() if self.pending_count is not None else None,
@@ -409,17 +411,22 @@ def run_job(job_cands: list[dict], args, stats: Stats):
                 # A cancelled ffmpeg must not permanently mark its input as broken.
                 if FORCE_STOP_EVENT.is_set():
                     return
-                record('skipped', items=[cand], stage='audio_preparation', error=err)
+                status = "skipped" if err in NO_RECOVERABLE_AUDIO else NEEDS_RECOVERY
+                record(status, items=[cand], stage='audio_preparation', error=err)
                 append_manifest({
                     "audio": cand["audio_rel"],
                     "sha256": sha256_file(cand["audio_abs"]) if os.path.exists(cand["audio_abs"]) else "",
-                    "status": "skipped",
+                    "status": status,
                     "reason": err,
                     "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
                 })
                 with stats.lock:
-                    stats.skipped += 1
-                emit(f"[SKIP] {cand['audio_rel']}: {err}", flush=True)
+                    if status == NEEDS_RECOVERY:
+                        stats.needs_recovery += 1
+                    else:
+                        stats.skipped += 1
+                tag = "RECOVERY" if status == NEEDS_RECOVERY else "SKIP"
+                emit(f"[{tag}] {cand['audio_rel']}: {err}", flush=True)
                 continue
             ready.append(item)
 

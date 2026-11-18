@@ -8,11 +8,13 @@ Keep the code in its own checkout. Each audio archive holds its own transcripts,
 
 ## Installation
 
-- Linux with Python 3.11 or later.
+- Linux or macOS with Python 3.11 or later.
 - `ffmpeg` and `ffprobe` from [FFmpeg](https://ffmpeg.org/download.html) on `PATH`.
 - [Google Antigravity CLI](https://antigravity.google/docs/getting-started) (`agy`). Run `agy` to sign in and make sure your account can use the models you select.
 - PyYAML is required to read and write transcript metadata and catalogs. The installation below installs it into a virtual environment.
 - `libfaad2` and `untrunc` are optional [audio recovery tools](#audio-recovery).
+
+On macOS, install FFmpeg with `brew install ffmpeg`. For recovery from damaged AAC containers, add `brew install faad2`. Install Antigravity CLI separately using the link above. [FFmpeg for Homebrew](https://formulae.brew.sh/formula/ffmpeg) · [FAAD2 for Homebrew](https://formulae.brew.sh/formula/faad2)
 
 ```bash
 git clone https://github.com/sukamenev/diaryze.git
@@ -60,11 +62,13 @@ In the author's runs, **five hours of Antigravity quota covered roughly 18–26 
 | FFprobe cannot open an unfinished container, for example `moov atom not found` | For eligible files, diaryze first tries to recover AAC frames with [FAAD2](https://github.com/knik0/faad2). FFmpeg builds a new container from the recovered frames. |
 | AAC recovery fails | If `untrunc` is on `PATH`, diaryze tries a playable M4A or MP4 in the same folder as a reference. A sample from the same device with the same settings is a better match. |
 
-**Use `libfaad2` for AAC recovery without `untrunc`.** On [Debian](https://packages.debian.org/trixie/libfaad2), install it with `sudo apt install libfaad2`. diaryze loads `libfaad.so.2` directly, so the separate `faad` executable is unnecessary. Recovery depends on how much of the AAC data survived. FFmpeg stream copy alone may be insufficient when the container index is missing.
+**Use FAAD2 for AAC recovery without `untrunc`.** On [Debian](https://packages.debian.org/trixie/libfaad2), install it with `sudo apt install libfaad2`. On macOS, use `brew install faad2`. diaryze loads the shared library directly. Recovery depends on how much of the AAC data survived. FFmpeg stream copy alone may be insufficient when the container index is missing.
 
 If your distribution has no `untrunc` package, [anthwlock/untrunc](https://github.com/anthwlock/untrunc#building) has build instructions and a Docker option for manual recovery. For automatic recovery, diaryze needs an `untrunc` executable on `PATH` that supports `-dst`.
 
 Recovery works on temporary files and preserves the original recording. Run `--selftest` to see which recovery tools are available. Use `--no-faad` or `--no-untrunc` to disable a recovery method.
+
+If the recording still cannot be read or prepared, including when both optional tools are absent, diaryze skips transcription and records `needs_recovery` in `docs/manifest.jsonl` with the reason and source hash. Empty files and files with no audio stream get `skipped`. After installing recovery tools, use `diaryze --retry-recovery` to include these recordings in the queue. This option also includes damaged files recorded as `skipped` by earlier versions. A previously flagged file whose contents have changed returns to the regular queue.
 
 ## Archive layout
 

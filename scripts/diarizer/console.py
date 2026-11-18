@@ -128,7 +128,7 @@ def emit(message, *, file=None, flush=True, final=False):
     stream = file if file is not None else sys.stdout
     message = str(message)
     palette = Palette(stream)
-    message = re.sub(r"^\[(WARN|ERR|REFUSED|SKIP)\]", lambda m: palette.paint(
+    message = re.sub(r"^\[(WARN|ERR|REFUSED|SKIP|RECOVERY)\]", lambda m: palette.paint(
         m.group(), "1;31" if m.group(1) == "ERR" else "33"), message, count=1)
     with PRINT_LOCK:
         live = _LIVE
@@ -169,8 +169,9 @@ def render_progress(stats, palette, *, clock=False):
     speed = stats["audio_ms"] / (1000 * max(1e-6, stats["elapsed_s"]))
     parts.append(palette.paint(f"x{speed:.1f}", "1"))
     for key, label, color in (("skipped", "пропуски", "33"),
+                              ("needs_recovery", "нужно восстановить", "33"),
                               ("refused", "отказы", "33"), ("errors", "сбои", "1;31")):
-        if stats[key]:
+        if stats.get(key):
             parts.append(palette.paint(f"{label} {stats[key]}", color))
     if stats.get('failed_files'):
         parts.append(palette.paint(f"не обработано после сбоев {stats['failed_files']}", '1;31'))

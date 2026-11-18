@@ -5,20 +5,40 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import time
 
 from .runtime import FORCE_STOP_EVENT
 
 
-def _child_groups(parent_pid):
-    """Include detached descendants, such as sudo's PTY command session."""
-    children = {}
+def _process_table():
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(["ps", "-axo", "pid=,ppid=,pgid="],
+                                    capture_output=True, text=True, timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        if result.returncode == 0:
+            for row in result.stdout.splitlines():
+                try:
+                    pid, parent, group = map(int, row.split())
+                except ValueError:
+                    continue
+                yield pid, parent, group
+        return
     for path in Path("/proc").glob("[0-9]*/stat"):
         try:
             fields = path.read_text().rsplit(")", 1)[1].split()
-            children.setdefault(int(fields[1]), []).append((int(path.parent.name), int(fields[2])))
+            yield int(path.parent.name), int(fields[1]), int(fields[2])
         except (OSError, ValueError, IndexError):
             continue
+
+
+def _child_groups(parent_pid):
+    """Include detached descendants, such as sudo's PTY command session."""
+    children = {}
+    for pid, parent, group in _process_table():
+        children.setdefault(parent, []).append((pid, group))
     groups = {parent_pid}
     pending = [parent_pid]
     while pending:
