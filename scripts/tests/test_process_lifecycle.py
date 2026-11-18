@@ -110,6 +110,7 @@ from scripts.diarizer.processes import run_capture
 from scripts.diarizer.runtime import stop_signals
 from scripts.diarizer.terminal import preserve_terminal
 fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+original_attrs = termios.tcgetattr(0)
 def work():
     try:
         run_capture([sys.executable, '-c', {command!r}])
@@ -126,9 +127,10 @@ with stop_signals(), preserve_terminal():
     print('READY', flush=True)
     worker.join()
     print('DONE', flush=True)
+assert termios.tcgetattr(0) == original_attrs
+print('RESTORED', flush=True)
 '''
             master, slave = pty.openpty()
-            original_attrs = termios.tcgetattr(slave)
             proc = subprocess.Popen([sys.executable, "-c", driver], cwd=ROOT, stdin=slave,
                                     stdout=slave, stderr=slave, start_new_session=True)
             output = bytearray()
@@ -149,11 +151,11 @@ with stop_signals(), preserve_terminal():
                 # Keep draining the PTY while the driver restores the terminal.
                 read_until(b"DONE", timeout=10)
                 read_until(b"\x1b[?2004l")
+                # Darwin can revoke the slave PTY when its session leader exits.
+                read_until(b"RESTORED")
                 proc.wait(timeout=5)
                 self.assertEqual(proc.returncode, 0, output.decode(errors="replace"))
                 self.assertFalse(running(int(marker.read_text())))
-                self.assertEqual(termios.tcgetattr(slave), original_attrs)
-                self.assertIn(b"DONE", output)
             finally:
                 if proc.poll() is None:
                     proc.kill()
