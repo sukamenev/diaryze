@@ -146,16 +146,18 @@ with stop_signals(), preserve_terminal():
                 read_until(b"[STOP]")
                 os.write(master, b"\x03")
                 read_until(b"[FORCE STOP]")
+                # Keep draining the PTY while the driver restores the terminal.
+                read_until(b"DONE", timeout=10)
+                read_until(b"\x1b[?2004l")
                 proc.wait(timeout=5)
                 self.assertEqual(proc.returncode, 0, output.decode(errors="replace"))
                 self.assertFalse(running(int(marker.read_text())))
                 self.assertEqual(termios.tcgetattr(slave), original_attrs)
-                read_until(b"\x1b[?2004l")
                 self.assertIn(b"DONE", output)
             finally:
                 if proc.poll() is None:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                    proc.wait()
+                    proc.kill()
+                    proc.wait(timeout=5)
                 kill_marker(marker)
                 os.close(master)
                 os.close(slave)
