@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diaryze"
+version = "0.1.0"
+description = "Transcribe and diarize a folder of audio recordings into searchable Markdown"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = ["PyYAML>=6,<7"]
+
+[project.scripts]
+diaryze = "diarizer.cli:main"
+
+[tool.setuptools]
+packages = ["diarizer"]
+package-dir = {diarizer = "scripts/diarizer"}
+
+[tool.setuptools.package-data]
+diarizer = ["promts/*.md"]
