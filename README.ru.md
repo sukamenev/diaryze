@@ -86,6 +86,7 @@ python3 /путь/к/diaryze/scripts/find.py --root "/путь/к/записям
 | [find_audio_duplicates.py](scripts/find_audio_duplicates.py) | Отчёт о побайтовых копиях аудио. |
 | [audit_recording_dates.py](scripts/audit_recording_dates.py) | Сверка дат по именам, метаданным и времени изменения. Для изменения дат аудио нужны план и `--apply`. |
 | [sync_md_dates.py](scripts/sync_md_dates.py) | Сверка времени изменения MD с датой записи. Ключ `--apply` синхронизирует даты. |
+| [swap_speakers.py](scripts/swap_speakers.py) | Меняет местами метки двух говорящих в репликах одного MD. Аргументы `"Text/запись.m4a.md" "Анна" "Иван"` показывают, сколько реплик сменит метку. Ключ `--apply` сохраняет правку. |
 | [relink_catalog_speakers.py](scripts/relink_catalog_speakers.py) | Поиск карточек для непривязанных голосов. |
 | [migrate_identification.py](scripts/migrate_identification.py), [migrate_phone_owners.py](scripts/migrate_phone_owners.py), [migrate_catalog_fields.py](scripts/migrate_catalog_fields.py) | Предпросмотр обновлений MD. Ключ `--apply` записывает их. |
 

@@ -86,6 +86,7 @@ python3 /path/to/diaryze/scripts/find.py --root "/path/to/recordings" --folder P
 | [find_audio_duplicates.py](scripts/find_audio_duplicates.py) | Report byte-identical audio files. |
 | [audit_recording_dates.py](scripts/audit_recording_dates.py) | Compare dates from filenames, metadata, and file times. Changing audio timestamps requires a plan and `--apply`. |
 | [sync_md_dates.py](scripts/sync_md_dates.py) | Check transcript file times against recording dates. Use `--apply` to sync. |
+| [swap_speakers.py](scripts/swap_speakers.py) | Swap two speaker labels in the timestamped turns of one transcript. Run with `"Text/recording.m4a.md" "Alice" "Bob"` to preview. Add `--apply` to save. |
 | [relink_catalog_speakers.py](scripts/relink_catalog_speakers.py) | Match unlinked speakers to existing cards. |
 | [migrate_identification.py](scripts/migrate_identification.py), [migrate_phone_owners.py](scripts/migrate_phone_owners.py), [migrate_catalog_fields.py](scripts/migrate_catalog_fields.py) | Preview transcript migrations. Use `--apply` to write changes. |
 
