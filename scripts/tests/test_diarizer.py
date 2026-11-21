@@ -435,6 +435,7 @@ class AudioTests(TemporaryArchive):
             self.assertIsNone(error)
             self.assertAlmostEqual(ready["duration_ms"], 2000, delta=200)
             self.assertEqual(ready["sha256"], digest)
+            self.assertIsNone(audio.decode_audio_error(ready["clean_abs"]))
         self.assertEqual(archive.sha256_file(str(path)), digest)
 
         path.write_bytes(data)

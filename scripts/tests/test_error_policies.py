@@ -52,6 +52,9 @@ class ErrorClassificationTests(unittest.TestCase):
             ('FORMAT: invalid JSON', 'format'),
             ('RESOURCE_EXHAUSTED: input token limit reached, maximum context length exceeded', 'input'),
             ('HTTP 413: request entity too large', 'input'),
+            ('INVALID_ARGUMENT (code 400): Unable to process input: the file or media data is empty, corrupted, or malformed.', 'media'),
+            ('MEDIA: rejected audio', 'media'),
+            ('INVALID_ARGUMENT (code 400): invalid generation config', 'unknown'),
             ('Something unexplained happened', 'unknown'),
             (PermissionError('permission denied reading /tmp/audio'), 'unknown'),
         ]

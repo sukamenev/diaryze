@@ -17,7 +17,7 @@ from .config import (
     REFUSAL_TEXT_PAT, SAFETY_ERR_PAT, TZ,
 )
 from .models import ModelAttempts, ModelCooldowns
-from .errors import ModelRefused, ModelsUnavailable, ModelTaskFailed, classify_error, normalize_error
+from .errors import MediaInputError, ModelRefused, ModelsUnavailable, ModelTaskFailed, classify_error, normalize_error
 from .prompts import build_batch_prompt, build_part_prompt
 from .runtime import FORCE_STOP_EVENT, STOP_EVENT
 from .console import completed, emit
@@ -56,6 +56,26 @@ def record_refused(item: dict, reason: str, models_tried: list[str], stats: "Sta
         stats.refused += 1
     models_lbl = ",".join(models_tried) if models_tried else "?"
     emit(f"[REFUSED] {item['audio_rel']} ({models_lbl}): {str(reason)[:180]}", flush=True)
+
+
+def record_audio_problem(item, error, stats, *, stage, sha256=None):
+    status = "skipped" if error in NO_RECOVERABLE_AUDIO else NEEDS_RECOVERY
+    record(status, items=[item], stage=stage, error=error)
+    append_manifest({
+        "audio": item["audio_rel"],
+        "sha256": sha256 or (
+            sha256_file(item["audio_abs"]) if os.path.exists(item["audio_abs"]) else ""),
+        "status": status,
+        "reason": str(error),
+        "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
+    })
+    with stats.lock:
+        if status == NEEDS_RECOVERY:
+            stats.needs_recovery += 1
+        else:
+            stats.skipped += 1
+    tag = "RECOVERY" if status == NEEDS_RECOVERY else "SKIP"
+    emit(f"[{tag}] {item['audio_rel']}: {error}", flush=True)
 
 
 class Stats:
@@ -144,6 +164,8 @@ def _retry_items_individually(items: list[dict], reason: str, args, people: dict
             process_short_batch([it], args, people, orgs, stats)
         except ModelRefused as mr:
             record_refused(it, mr.reason, mr.models_tried, stats)
+        except MediaInputError as exc:
+            record_audio_problem(it, exc, stats, stage='media_input', sha256=it['sha256'])
         except InterruptedError:
             raise
         except ModelsUnavailable:
@@ -171,6 +193,9 @@ def _request(prompt, model, args, stats, items, *, conversation_id=None, **detai
     if err:
         record('model_error', items=items, model=model, error=err,
                stdout=stdout, stderr=stderr, **details)
+        if classify_error(err) == 'media':
+            agy_forget(home, cid)
+            raise MediaInputError(err)
     else:
         stats.models.success(model)
     return err, text, cid, home
@@ -452,6 +477,11 @@ def process_short_batch(items: list[dict], args, people: dict, orgs: dict, stats
                            salvage=True, reason=str(exc))
         stats.complete(item, publish_md(item, md, candidate_model))
         return
+    except MediaInputError:
+        if len(items) == 1:
+            raise
+        emit(f"[WARN] {scope}: повреждённые медиаданные; проверяю файлы по одному")
+        _retry_items_individually(items, 'media input rejected', args, people, orgs, stats)
     finally:
         agy_forget(home, conv_id)
 
@@ -481,22 +511,7 @@ def run_job(job_cands: list[dict], args, stats: Stats):
                 # A cancelled ffmpeg must not permanently mark its input as broken.
                 if FORCE_STOP_EVENT.is_set():
                     return
-                status = "skipped" if err in NO_RECOVERABLE_AUDIO else NEEDS_RECOVERY
-                record(status, items=[cand], stage='audio_preparation', error=err)
-                append_manifest({
-                    "audio": cand["audio_rel"],
-                    "sha256": sha256_file(cand["audio_abs"]) if os.path.exists(cand["audio_abs"]) else "",
-                    "status": status,
-                    "reason": err,
-                    "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
-                })
-                with stats.lock:
-                    if status == NEEDS_RECOVERY:
-                        stats.needs_recovery += 1
-                    else:
-                        stats.skipped += 1
-                tag = "RECOVERY" if status == NEEDS_RECOVERY else "SKIP"
-                emit(f"[{tag}] {cand['audio_rel']}: {err}", flush=True)
+                record_audio_problem(cand, err, stats, stage='audio_preparation')
                 continue
             ready.append(item)
 
@@ -511,6 +526,8 @@ def run_job(job_cands: list[dict], args, stats: Stats):
                 process_long_item(litem, args, people, orgs, stats)
             except ModelRefused as mr:
                 record_refused(litem, mr.reason, mr.models_tried, stats)
+            except MediaInputError as exc:
+                record_audio_problem(litem, exc, stats, stage='media_input', sha256=litem['sha256'])
             except InterruptedError:
                 return
             except ModelsUnavailable as exc:
@@ -530,6 +547,9 @@ def run_job(job_cands: list[dict], args, stats: Stats):
             except ModelRefused as mr:
                 for sh in shorts:
                     record_refused(sh, mr.reason, mr.models_tried, stats)
+            except MediaInputError as exc:
+                for sh in shorts:
+                    record_audio_problem(sh, exc, stats, stage='media_input', sha256=sh['sha256'])
             except InterruptedError:
                 return
             except ModelsUnavailable as exc:

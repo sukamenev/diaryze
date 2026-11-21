@@ -18,6 +18,10 @@ class ModelTaskFailed(RuntimeError):
     pass
 
 
+class MediaInputError(RuntimeError):
+    """The provider rejected the media bytes; changing models cannot repair them."""
+
+
 class ModelsUnavailable(RuntimeError):
     def __init__(self, message, *, all_disabled=False):
         super().__init__(message)
@@ -27,13 +31,14 @@ class ModelsUnavailable(RuntimeError):
 PREFIXES = {
     "SAFETY": "content", "QUOTA": "quota", "ERR_503": "503",
     "ERR_SERVER": "server", "ERR_CONNECTION": "connection", "ERR_TIMEOUT": "timeout",
-    "FATAL": "fatal", "FORMAT": "format", "INPUT": "input",
+    "FATAL": "fatal", "FORMAT": "format", "INPUT": "input", "MEDIA": "media",
 }
 LABELS = {
     "503": "перегрузка / 503", "server": "сбой сервера", "connection": "сбой соединения",
     "timeout": "таймаут", "quota": "квота", "fatal": "ошибка доступа или модели",
     "content": "отказ по содержимому", "format": "неверный формат ответа",
     "input": "неподдерживаемые входные данные или размер запроса",
+    "media": "повреждённые медиаданные",
     "unknown": "неизвестная ошибка",
 }
 _FATAL = re.compile(
@@ -47,6 +52,8 @@ _NETWORK = re.compile(
 _TIMEOUT = re.compile(r"\btimeout\b|timed out|deadline[_ ]exceeded", re.I)
 _OVERLOAD = re.compile(r"\boverloaded\b|\bat capacity\b|no capacity available|servers.*high traffic", re.I)
 _CONTENT = re.compile(r"content policy|safety policy|policy violation|blocked for safety", re.I)
+_MEDIA = re.compile(
+    r"(?:file|media|audio)(?: or media)?(?: data)? is empty, corrupted, or malformed", re.I)
 _INPUT_SIZE = re.compile(
     r"context (?:window|length|limit)|maximum (?:context|length|tokens)|token limit|"
     r"(?:input|prompt|request|audio|file)[^\n]{0,40}too (?:long|large)|"
@@ -75,6 +82,8 @@ def classify_error(error):
     codes = set(_HTTP_CODE.findall(text))
     if codes & {"401", "403", "404"} or _FATAL.search(text):
         return "fatal"
+    if _MEDIA.search(text):
+        return "media"
     if _INPUT_SIZE.search(text):
         return "input"
     if "429" in codes:

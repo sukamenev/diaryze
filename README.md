@@ -70,6 +70,8 @@ diaryze works on temporary copies. It uses FFmpeg to copy the first readable aud
 
 If AAC recovery fails, diaryze can use `untrunc` on `PATH` with `-dst` support and a playable M4A or MP4 in the same folder. A reference from the same device and settings works best. Manual Docker use and build instructions are available upstream. [untrunc](https://github.com/anthwlock/untrunc#building)
 
+Recovered audio and the prepared stream must pass a full strict decode before transcription. If the provider still rejects media as empty, corrupted, or malformed, diaryze records `needs_recovery` instead of sending the same bytes to every model. A rejected batch is retried one file at a time so healthy recordings can finish.
+
 If a file remains unreadable, diaryze skips transcription and records `needs_recovery` with the reason and source hash. Empty files and files without audio get `skipped`. After installing recovery tools, run `diaryze --retry-recovery` to include flagged files and damaged files skipped by earlier versions. Files tagged `needs_recovery` reenter the regular queue if their bytes change. Use `--no-faad` or `--no-untrunc` to disable a method.
 
 ## Search and maintain an archive

@@ -46,6 +46,18 @@ def find_untrunc() -> str | None:
     return shutil.which("untrunc")
 
 
+def decode_audio_error(path: str) -> str | None:
+    """Decode the whole stream strictly; a readable container alone is insufficient."""
+    p = run_capture(
+        ["ffmpeg", "-v", "error", "-xerror", "-abort_on", "empty_output",
+         "-i", path, "-map", "0:a:0", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    if p.returncode != 0:
+        return "audio decode failed: " + (p.stderr.strip() or f"ffmpeg exit {p.returncode}")[:300]
+    return None
+
+
 def _find_reference_audio(fp: str, limit: int = 2) -> list[str]:
     """Pick nearby valid .m4a/.mp4 reference files in the same directory."""
     parent = os.path.dirname(fp)
@@ -118,7 +130,7 @@ def untrunc_recover(fp: str, tmp_dir: str, untrunc_bin: str | None) -> tuple[str
             continue
         if os.path.exists(out_m4a) and os.path.getsize(out_m4a) > 1024:
             ms, err = probe_duration_ms(out_m4a)
-            if not err and ms and ms > 0:
+            if not err and ms and ms > 0 and not decode_audio_error(out_m4a):
                 return out_m4a, ms
     return None, None
 
@@ -299,7 +311,9 @@ def faad_recover_aac(fp: str, tmp_dir: str) -> tuple[str | None, int | None]:
         while off + 4 < n:
             rem = min(8192, n - off)
             lib.NeAACDecDecode(dec, ctypes.byref(info), ctypes.c_char_p(base_addr + off), rem)
-            if info.error == 0 and 0 < info.bytesconsumed <= rem and info.samples > 0:
+            # Decoder delay can leave the first valid frame without PCM output.
+            # Preserve the frame and advance past it rather than scanning its interior.
+            if info.error == 0 and 0 < info.bytesconsumed <= rem:
                 flen = info.bytesconsumed
                 full_len = 7 + flen
                 adts_frames.extend((
@@ -332,7 +346,7 @@ def faad_recover_aac(fp: str, tmp_dir: str) -> tuple[str | None, int | None]:
     if p.returncode != 0 or not os.path.exists(out_m4a):
         return None, None
     ms, err = probe_duration_ms(out_m4a)
-    if err or not ms or ms <= 0:
+    if err or not ms or ms <= 0 or decode_audio_error(out_m4a):
         return None, None
     return out_m4a, ms
 
@@ -383,12 +397,15 @@ def prepare_audio_work(
     if remux.returncode != 0 or not os.path.exists(clean_path) or os.path.getsize(clean_path) == 0:
         clean_path = os.path.join(tmp_dir, "decoded.wav")
         decoded = run_capture(
-            ["ffmpeg", "-y", "-v", "error", "-i", work_src,
+            ["ffmpeg", "-y", "-v", "error", "-xerror", "-i", work_src,
              "-map", "0:a:0", "-vn", "-c:a", "pcm_s16le", clean_path],
             capture_output=True, text=True,
         )
         if decoded.returncode != 0 or not os.path.exists(clean_path) or os.path.getsize(clean_path) == 0:
             return None, "ffmpeg audio preparation: " + (decoded.stderr.strip() or "empty output")[:300]
+
+    if decode_error := decode_audio_error(clean_path):
+        return None, decode_error
 
     parts = []
     if dur_ms > max_single_sec * 1000:
