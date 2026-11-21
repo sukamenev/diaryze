@@ -10,6 +10,7 @@ import time
 
 from .agy import agy_forget, extract_envelope_error_and_usage, run_agy
 from .archive import append_manifest, load_refs, publish_md, register_catalog_entries, sha256_file
+from .checkpoints import LongCheckpoint
 from .audio import prepare_audio_work, probe_duration_ms
 from .config import (
     BACKEND_RETRY_BASE_S, BACKEND_RETRY_MAX_S, NEEDS_RECOVERY, NO_RECOVERABLE_AUDIO, PART_REPAIR_ATTEMPTS,
@@ -192,6 +193,106 @@ def _response_error(raw, error):
     return f"{'SAFETY' if is_refusal else 'FORMAT'}: {error}"
 
 
+def _restore_part(item, part, saved, model, people, orgs):
+    """Validate a saved part once and return its speaker map and local lines."""
+    if not isinstance(saved, dict):
+        raise ValueError('saved part is not a mapping')
+    speakers = saved.get('speakers')
+    if speakers is not None and not isinstance(speakers, dict):
+        raise ValueError('invalid speakers in saved part')
+    raw_lines = saved.get('lines')
+    if not isinstance(raw_lines, list):
+        raise ValueError('invalid lines in saved part')
+    lines = []
+    for raw in raw_lines:
+        if not isinstance(raw, (list, tuple)) or len(raw) != 3:
+            raise ValueError('invalid line in saved part')
+        local_ms, speaker, text = raw
+        if (isinstance(local_ms, bool) or not isinstance(local_ms, int)
+                or not isinstance(speaker, str) or not isinstance(text, str)):
+            raise ValueError('invalid line fields in saved part')
+        lines.append((min(part['duration_ms'], max(0, local_ms)), speaker, text))
+    validate_and_render_md(
+        dict(item, duration_ms=part['duration_ms'], summary=saved.get('summary')),
+        speakers, lines, not lines, model, people, orgs,
+        salvage=bool(saved.get('warning')), register_catalog=None,
+    )
+    return speakers, lines
+
+
+def _request_part(item, part, args, people, orgs, stats, attempts, chain,
+                  model_idx, conv_id, home, speakers):
+    """Recognize one part, returning its data and the updated session state."""
+    prompt_item = dict(item)  # Keep the previous-part summary across model switches.
+    item['summary'] = None
+    repair_prompt = None
+    attempt = 0
+    candidate = None
+    warning = None
+    try:
+        while True:
+            stats.wait_backend()
+            selected = attempts.select(model_idx)
+            if selected != model_idx:
+                agy_forget(home, conv_id)
+                conv_id = None
+                repair_prompt = None
+                attempt = 0
+            model_idx = selected
+            cur_model = chain[model_idx]
+            attempts.started(model_idx)
+            prompt = repair_prompt or build_part_prompt(
+                prompt_item, part, people, orgs, is_first=(part['part'] == 1),
+                fresh_session=not conv_id, speaker_context=speakers,
+            )
+            err, text, cid, new_home = _request(
+                prompt, cur_model, args, stats, [item], conversation_id=conv_id, part=part['part'],
+            )
+            home = new_home if new_home is not None else home
+            conv_id = cid or conv_id
+            if err:
+                agy_forget(home, conv_id)
+                conv_id = None
+                model_idx = attempts.failed(
+                    model_idx, err, scope=f"{item['audio_rel']} part {part['part']}")
+                repair_prompt = None
+                attempt = 0
+                continue
+            capture_summary(item, text)
+            try:
+                sp, plines, no_speech = parse_speakers_and_lines(text)
+                if plines:
+                    candidate = (sp, plines, cur_model, item.get('summary'))
+                validate_and_render_md(
+                    dict(item, duration_ms=part['duration_ms']), {**(speakers or {}), **(sp or {})},
+                    plines, no_speech, cur_model, people, orgs,
+                    register_catalog=register_catalog_entries,
+                )
+                return sp, plines, cur_model, warning, model_idx, conv_id, home
+            except (ValueError, TypeError) as exc:
+                record('validation_error', items=[item], model=cur_model, part=part['part'],
+                       error=exc, response=text)
+                attempt += 1
+                failure = _response_error(text, exc)
+                if (classify_error(failure) != 'content' and attempt < PART_REPAIR_ATTEMPTS
+                        and not stats.models.remaining(cur_model)):
+                    repair_prompt = load_prompt('repair-part.md', part_number=part['part'],
+                                                error=exc, part_end=format_ts(part['duration_ms']))
+                    continue
+                agy_forget(home, conv_id)
+                conv_id = None
+                model_idx = attempts.failed(
+                    model_idx, failure, scope=f"{item['audio_rel']} part {part['part']}")
+                repair_prompt = None
+                attempt = 0
+    except ModelTaskFailed as exc:
+        if candidate is None:
+            raise
+        sp, plines, used_model, item['summary'] = candidate
+        warning = f"Часть {part['part']}: {exc} (сохранено с подрезанием)."
+        return sp, plines, used_model, warning, model_idx, conv_id, home
+
+
 def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) -> bool:
     chain = getattr(args, 'model_chain', None) or [args.model]
     attempts = ModelAttempts(chain, stats.models, [item], stop_on_quota=args.stop_on_quota)
@@ -202,73 +303,41 @@ def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) 
     all_lines = []
     last_ms = -1
     part_warnings = []
+    checkpoint = LongCheckpoint(item)
+    restored = {}
+    for part in item['parts']:
+        saved = checkpoint.get(part['part'])
+        if saved is None:
+            break
+        try:
+            restored[part['part']] = _restore_part(
+                item, part, saved, saved.get('model') or used_model, people, orgs)
+        except (ValueError, TypeError, KeyError) as exc:
+            record('checkpoint_part_invalid', items=[item], part=part['part'], error=exc,
+                   path=str(checkpoint.path))
+            checkpoint.drop_from(part['part'])
+            break
+    if restored:
+        emit(f"Продолжение {item['audio_rel']}: сохранены части 1–{len(restored)} "
+             f"из {len(item['parts'])}", flush=True)
+        record('checkpoint_resumed', items=[item], parts=len(restored))
     try:
         for part in item['parts']:
-            prompt_item = dict(item)  # Keep the previous-part summary across model switches.
-            item['summary'] = None
-            repair_prompt = None
-            attempt = 0
-            candidate = None
-            try:
-                while True:
-                    stats.wait_backend()
-                    selected = attempts.select(model_idx)
-                    if selected != model_idx:
-                        agy_forget(home, conv_id)
-                        conv_id = None
-                        repair_prompt = None
-                        attempt = 0
-                    model_idx = selected
-                    cur_model = chain[model_idx]
-                    attempts.started(model_idx)
-                    prompt = repair_prompt or build_part_prompt(
-                        prompt_item, part, people, orgs, is_first=(part['part'] == 1),
-                        fresh_session=not conv_id, speaker_context=speakers,
-                    )
-                    err, text, cid, new_home = _request(
-                        prompt, cur_model, args, stats, [item], conversation_id=conv_id, part=part['part'],
-                    )
-                    home = new_home if new_home is not None else home
-                    conv_id = cid or conv_id
-                    if err:
-                        agy_forget(home, conv_id)
-                        conv_id = None
-                        model_idx = attempts.failed(model_idx, err, scope=f"{item['audio_rel']} part {part['part']}")
-                        repair_prompt = None
-                        attempt = 0
-                        continue
-                    capture_summary(item, text)
-                    try:
-                        sp, plines, no_speech = parse_speakers_and_lines(text)
-                        if plines:
-                            candidate = (sp, plines, cur_model, item.get('summary'))
-                        validate_and_render_md(
-                            dict(item, duration_ms=part['duration_ms']), {**(speakers or {}), **(sp or {})},
-                            plines, no_speech, cur_model, people, orgs,
-                            register_catalog=register_catalog_entries,
-                        )
-                        used_model = cur_model
-                        break
-                    except (ValueError, TypeError) as exc:
-                        record('validation_error', items=[item], model=cur_model, part=part['part'],
-                               error=exc, response=text)
-                        attempt += 1
-                        failure = _response_error(text, exc)
-                        if classify_error(failure) != 'content' and attempt < PART_REPAIR_ATTEMPTS and not stats.models.remaining(cur_model):
-                            repair_prompt = load_prompt('repair-part.md', part_number=part['part'],
-                                                        error=exc, part_end=format_ts(part['duration_ms']))
-                            continue
-                        agy_forget(home, conv_id)
-                        conv_id = None
-                        model_idx = attempts.failed(model_idx, failure,
-                                                    scope=f"{item['audio_rel']} part {part['part']}")
-                        repair_prompt = None
-                        attempt = 0
-            except ModelTaskFailed as exc:
-                if candidate is None:
-                    raise
-                sp, plines, used_model, item['summary'] = candidate
-                part_warnings.append(f"Часть {part['part']}: {exc} (сохранено с подрезанием).")
+            number = part['part']
+            if number in restored:
+                sp, plines = restored[number]
+                saved = checkpoint.get(number)
+                used_model = saved.get('model') or used_model
+                item['summary'] = saved.get('summary')
+                warning = saved.get('warning')
+            else:
+                sp, plines, used_model, warning, model_idx, conv_id, home = _request_part(
+                    item, part, args, people, orgs, stats, attempts, chain,
+                    model_idx, conv_id, home, speakers)
+                checkpoint.save(number, speakers=sp, lines=plines, model=used_model,
+                                summary=item.get('summary'), warning=warning)
+            if warning:
+                part_warnings.append(warning)
             if sp:
                 speakers = {**(speakers or {}), **sp}
             for local_ms, speaker_id, txt in plines:
@@ -287,6 +356,7 @@ def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) 
             register_catalog=register_catalog_entries,
         )
         stats.complete(item, publish_md(item, md, used_model))
+        checkpoint.discard()
         return True
     finally:
         agy_forget(home, conv_id)

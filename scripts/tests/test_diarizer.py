@@ -14,7 +14,8 @@ import wave
 
 import yaml
 
-from scripts.diarizer import agy, archive, audio, cli, config, console, pipeline, processes, prompts, quota, runtime
+from scripts.diarizer import (agy, archive, audio, checkpoints, cli, config, console, pipeline,
+                              processes, prompts, quota, runtime)
 
 
 def envelope(text, status="SUCCESS", conversation="test-conversation"):
@@ -318,6 +319,77 @@ class PipelineTests(TemporaryArchive):
         md_meta = yaml.safe_load(Path(item["target_md"]).read_text(encoding="utf-8").split("---", 2)[1])
         self.assertEqual(md_meta["speakers"]["Робот"]["org"], "beeline")
         self.assertEqual(md_meta["identification"], "complete")
+
+
+class CheckpointTests(TemporaryArchive):
+    def args(self):
+        return SimpleNamespace(model="first", model_chain=["first", "second"], timeout=10,
+                               no_custom_agent=False, stop_on_quota=False, fallback_on_quota=False)
+
+    def long_item(self):
+        item = self.item("long-checkpoint.m4a", duration=20000)
+        item["parts"] = [
+            {"part": 1, "path": "part1.wav", "duration_ms": 10000, "offset_ms": 0},
+            {"part": 2, "path": "part2.wav", "duration_ms": 10000, "offset_ms": 10000},
+        ]
+        return item
+
+    def save_first_part(self, checkpoint):
+        checkpoint.save(1,
+                        speakers={"Собеседник": {"person": None, "note": "Не представился."}},
+                        lines=[[1000, "Собеседник", "Привет."]],
+                        model="first", summary="Обсудили бумагу.")
+
+    def test_resumes_from_saved_part_and_discards_checkpoint(self):
+        item = self.long_item()
+        checkpoint = checkpoints.LongCheckpoint(item)
+        self.save_first_part(checkpoint)
+        saved = json.loads(checkpoint.path.read_text(encoding="utf-8"))
+        self.assertNotIn("no_speech", saved["parts"]["1"])
+
+        second = ('SPEAKERS_JSON: {"Собеседник": {"person": null, "note": "Не представился."}}\n'
+                  '[00:00:02.00] **Собеседник** Продолжение.')
+        stats = pipeline.Stats()
+        with mock.patch.object(pipeline, "run_agy", return_value=envelope(second)) as run, \
+                mock.patch.object(pipeline, "agy_forget"), contextlib.redirect_stdout(io.StringIO()):
+            pipeline.process_long_item(item, self.args(), {}, {}, stats)
+        self.assertEqual(run.call_count, 1)
+        self.assertIn("Known speakers from earlier parts", run.call_args.args[0])
+        self.assertIn("Обсудили бумагу.", run.call_args.args[0])
+        md = Path(item["target_md"]).read_text(encoding="utf-8")
+        self.assertIn("[00:00:01.00] **Собеседник** Привет.", md)
+        self.assertIn("[00:00:12.00] **Собеседник** Продолжение.", md)
+        self.assertEqual(stats.done, 1)
+        self.assertFalse(checkpoint.path.exists())
+
+    def test_layout_change_ignores_saved_parts(self):
+        item = self.long_item()
+        checkpoint = checkpoints.LongCheckpoint(item)
+        self.save_first_part(checkpoint)
+        item["parts"][0]["duration_ms"] = 11000
+
+        with mock.patch.object(pipeline, "run_agy", side_effect=[envelope(REPLY), envelope(REPLY)]) as run, \
+                mock.patch.object(pipeline, "agy_forget"), contextlib.redirect_stdout(io.StringIO()):
+            pipeline.process_long_item(item, self.args(), {}, {}, pipeline.Stats())
+        self.assertEqual(run.call_count, 2)
+        self.assertFalse(checkpoint.path.exists())
+
+    def test_invalid_saved_part_is_recomputed_without_touching_earlier_part(self):
+        item = self.long_item()
+        checkpoint = checkpoints.LongCheckpoint(item)
+        self.save_first_part(checkpoint)
+        checkpoint.save(2,
+                        speakers={"Собеседник": {"person": None, "note": "Не представился."}},
+                        lines=[[1000, "Собеседник"]], model="first", summary=None)
+
+        second = '[00:00:02.00] **Собеседник** Продолжение.'
+        with mock.patch.object(pipeline, "run_agy", return_value=envelope(second)) as run, \
+                mock.patch.object(pipeline, "agy_forget"), contextlib.redirect_stdout(io.StringIO()):
+            pipeline.process_long_item(item, self.args(), {}, {}, pipeline.Stats())
+        self.assertEqual(run.call_count, 1)
+        md = Path(item["target_md"]).read_text(encoding="utf-8")
+        self.assertIn("[00:00:01.00] **Собеседник** Привет.", md)
+        self.assertIn("[00:00:12.00] **Собеседник** Продолжение.", md)
 
 
 class AudioTests(TemporaryArchive):
