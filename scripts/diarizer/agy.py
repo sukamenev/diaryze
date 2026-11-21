@@ -27,8 +27,9 @@ AGY_HOME_LOCK = threading.Lock()
 
 def ensure_agy_home(use_custom_agent: bool) -> str | None:
     """Create isolated temp HOME for agy to keep /resume clean and load minimal agent."""
-    if not os.path.exists(os.path.join(AGY_REAL, AGY_SHARED[0])):
-        return None
+    # Do not require antigravity-oauth-token: macOS signs in through Keychain,
+    # so the file can be absent while agy is authenticated. Link whatever shared
+    # files exist and install the reader profile regardless.
     home = os.path.join(tempfile.gettempdir(), f"diaryze-agy-{os.getuid()}")
     with AGY_HOME_LOCK:
         os.makedirs(home, mode=0o700, exist_ok=True)

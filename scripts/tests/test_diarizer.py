@@ -641,6 +641,35 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual((text, conv), (REPLY, "test-conversation"))
         self.assertEqual(usage["input_tokens"], 10)
 
+    def test_agy_home_without_token_file_installs_reader_profile(self):
+        # macOS keeps the login in Keychain, so the token file may be absent.
+        with tempfile.TemporaryDirectory() as real, tempfile.TemporaryDirectory() as tmp:
+            Path(real, "settings.json").write_text("{}")
+            with mock.patch.object(agy, "AGY_REAL", real), \
+                    mock.patch.object(agy.tempfile, "gettempdir", return_value=tmp):
+                home = agy.ensure_agy_home(True)
+            self.assertIsNotNone(home)
+            agent = Path(home, ".gemini", "config", "agents", "audio-reader", "agent.md")
+            self.assertTrue(agent.is_file())
+            cli = Path(home, ".gemini", "antigravity-cli")
+            self.assertEqual((cli / "settings.json").resolve(),
+                             Path(real, "settings.json").resolve())
+            self.assertFalse((cli / "antigravity-oauth-token").exists())
+
+    def test_run_agy_uses_reader_profile_without_token_file(self):
+        with tempfile.TemporaryDirectory() as real, tempfile.TemporaryDirectory() as tmp:
+            Path(real, "settings.json").write_text("{}")
+            payload = envelope(REPLY)[1]
+            result = SimpleNamespace(stdout=payload, stderr="", returncode=0)
+            with mock.patch.object(agy, "AGY_REAL", real), \
+                    mock.patch.object(agy.tempfile, "gettempdir", return_value=tmp), \
+                    mock.patch.object(agy, "run_capture", return_value=result) as run:
+                _, _, _, home = agy.run_agy("prompt", "model-test", 10, True)
+        cmd = run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("--agent") + 1], "audio-reader")
+        self.assertIn("--dangerously-skip-permissions", cmd)
+        self.assertEqual(run.call_args.kwargs["env"]["HOME"], home)
+
 
 if __name__ == "__main__":
     unittest.main()
