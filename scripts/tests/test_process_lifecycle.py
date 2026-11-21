@@ -144,12 +144,19 @@ with stop_signals(), preserve_terminal():
     print('READY', flush=True)
     worker.join()
     print('DONE', flush=True)
+# Darwin sets the transient PENDIN flag after tcsetattr while input is queued;
+# it is cleared when that input is reprocessed and is not a restore failure.
+pendin = getattr(termios, 'PENDIN', 0)
 restored = termios.tcgetattr(0)
-if restored != original_attrs:
-    diff = [(i, original_attrs[i], restored[i]) for i in range(len(original_attrs))
-            if original_attrs[i] != restored[i]]
+original_stable = list(original_attrs)
+restored_stable = list(restored)
+original_stable[3] &= ~pendin
+restored_stable[3] &= ~pendin
+if restored_stable != original_stable:
+    diff = [(i, original_stable[i], restored_stable[i])
+            for i in range(len(original_stable)) if original_stable[i] != restored_stable[i]]
     print('ATTRS_DIFF', diff, flush=True)
-assert restored == original_attrs
+assert restored_stable == original_stable
 print('RESTORED', flush=True)
 '''
             master, slave = pty.openpty()
