@@ -13,6 +13,7 @@ import termios
 import time
 import unittest
 
+from scripts.diarizer.agy import agy_envelope_complete, extract_envelope_error_and_usage
 from scripts.diarizer.processes import run_capture
 
 
@@ -57,6 +58,22 @@ print(json.dumps([sys.stdin.read(), os.isatty(0), os.isatty(1), os.isatty(2), co
         self.assertEqual(json.loads(result.stdout), ["", False, False, False, False])
         result = run_capture([sys.executable, "-c", code], input="prompt", timeout=5)
         self.assertEqual(json.loads(result.stdout)[0], "prompt")
+
+    def test_complete_envelope_survives_hang_guard_kill(self):
+        code = '''
+import json, signal, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+print(json.dumps({"status": "SUCCESS", "response": "READY", "conversation_id": "hang-test"}), flush=True)
+time.sleep(30)
+'''
+        result = run_capture([sys.executable, "-c", code], timeout=12,
+                             finish_when=agy_envelope_complete, finish_grace=0.3)
+        self.assertEqual(result.returncode, -signal.SIGKILL)
+        self.assertEqual(json.loads(result.stdout)["status"], "SUCCESS")
+        error, text, _, conv = extract_envelope_error_and_usage(
+            result.returncode, result.stdout, result.stderr)
+        self.assertIsNone(error)
+        self.assertEqual((text, conv), ("READY", "hang-test"))
 
     def test_timeout_kills_detached_descendant(self):
         with tempfile.TemporaryDirectory(prefix="diarizer-process-test-") as tmp:

@@ -117,7 +117,11 @@ def extract_envelope_error_and_usage(rc: int, stdout: str, stderr: str):
     usage = env.get("usage") or {}
     usage = usage if isinstance(usage, dict) else {}
     conv_id = env.get("conversation_id")
-    if isinstance(env, dict) and env.get("status") == "SUCCESS" and rc == 0:
+    # A complete SUCCESS envelope is the final answer even if agy lingers after
+    # printing it: the hang guard then kills the process and rc is -9. Partial
+    # and timed-out answers carry status ERROR, so the exit code alone must not
+    # discard a ready transcript.
+    if isinstance(env, dict) and env.get("status") == "SUCCESS":
         text = str(env.get("result") or env.get("response") or "")
         if SAFETY_ERR_PAT.search(text[:500]):
             return f"SAFETY: {text.strip()[:240]}", "", usage, conv_id
