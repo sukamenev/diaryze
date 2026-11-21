@@ -144,7 +144,12 @@ with stop_signals(), preserve_terminal():
     print('READY', flush=True)
     worker.join()
     print('DONE', flush=True)
-assert termios.tcgetattr(0) == original_attrs
+restored = termios.tcgetattr(0)
+if restored != original_attrs:
+    diff = [(i, original_attrs[i], restored[i]) for i in range(len(original_attrs))
+            if original_attrs[i] != restored[i]]
+    print('ATTRS_DIFF', diff, flush=True)
+assert restored == original_attrs
 print('RESTORED', flush=True)
 '''
             master, slave = pty.openpty()
