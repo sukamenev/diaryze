@@ -88,7 +88,7 @@ def managed_process(args, **kwargs):
 
 
 def run_capture(args, *, input=None, timeout=None, finish_when=None,
-                finish_grace=3.0, capture_output=True, text=True, **kwargs):
+                finish_grace=10.0, capture_output=True, text=True, **kwargs):
     """Like subprocess.run, but no terminal input, and force-stop aware."""
     if not capture_output or not text:
         raise ValueError("run_capture requires captured text output")
