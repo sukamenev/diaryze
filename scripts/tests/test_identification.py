@@ -185,6 +185,38 @@ speakers:
         self.assertEqual(status, "complete")
         self.assertEqual(relink_markdown_speakers(fixed, people, {})[0], fixed)
 
+    def test_relink_catalog_speakers_matches_nicknames(self):
+        people = {
+            "ivanov_sergey": {"name": "Иванов Сергей"},
+            "kuznetsov_andrey": {"name": "Андрей Кузнецов", "phones": ["+70000000103"], "nicknames": ["Кузнец"]},
+        }
+        raw = '''---
+schema_version: '1.0'
+identification: partial
+audio: Phone/2026/kuz2.m4a
+sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+duration_s: 10.00
+contact: Кузнец
+phones:
+- '+70000000103'
+speakers:
+  Сергей:
+    person: ivanov_sergey
+    source: speech
+  Кузнец:
+    person: null
+    note: Обращаются по прозвищу.
+---
+
+[00:00:01.00] **Сергей** Привет, Кузнец.
+[00:00:02.00] **Кузнец** Привет.
+'''.encode("utf-8")
+        fixed, status = relink_markdown_speakers(raw, people, {})
+        meta = yaml.safe_load(fixed.decode("utf-8").split("---", 2)[1])
+        self.assertEqual(meta["speakers"]["Кузнец"]["person"], "kuznetsov_andrey")
+        self.assertEqual(meta["speakers"]["Кузнец"]["source"], "filename")
+        self.assertEqual(status, "complete")
+
     def test_sync_md_dates_sets_mtime_from_recorded_at_and_filename_idempotently(self):
         with tempfile.TemporaryDirectory(prefix="md-dates-test-") as tmp:
             root = Path(tmp)

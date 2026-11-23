@@ -21,7 +21,11 @@ def _phone_forms(phone: str) -> set[str]:
 
 
 def _entry_tokens(info: dict) -> set[str]:
-    texts = [info.get("name") or ""] + list(info.get("aliases") or [])
+    texts = (
+        [info.get("name") or ""]
+        + list(info.get("aliases") or [])
+        + list(info.get("nicknames") or [])
+    )
     tokens = set()
     for text in texts:
         for word in re.findall(r"[а-яёa-z0-9]+", str(text).lower()):
@@ -36,9 +40,11 @@ def _matches_item(info: dict, item_phones: set[str], item_contacts: set[str], it
     for phone in info.get("phones") or []:
         if _phone_forms(phone) & item_phones:
             return True
-    names = {str(info.get("name") or "").strip().lower()} | {
-        str(a).strip().lower() for a in (info.get("aliases") or [])
-    }
+    names = (
+        {str(info.get("name") or "").strip().lower()}
+        | {str(a).strip().lower() for a in (info.get("aliases") or [])}
+        | {str(n).strip().lower() for n in (info.get("nicknames") or [])}
+    )
     names.discard("")
     if names & item_contacts:
         return True
@@ -79,7 +85,8 @@ def _select_refs(people: dict, orgs: dict, items: list[dict] | None) -> dict:
         if always or _matches_item(info, item_phones, item_contacts, item_tokens):
             matched_people[key] = info
         elif isinstance(info, dict) and info.get("name"):
-            other_people[key] = info["name"]
+            nicks = [str(n).strip() for n in (info.get("nicknames") or []) if str(n).strip()]
+            other_people[key] = f"{info['name']} [{', '.join(nicks)}]" if nicks else info["name"]
 
     matched_orgs = {}
     other_orgs = {}

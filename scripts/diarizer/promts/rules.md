@@ -31,7 +31,9 @@ For each speaker, set:
   Rules for creating a new ID (lowercase ASCII [a-z0-9_] only, GOST 7.79-2000 System B:
   а=a,б=b,в=v,г=g,д=d,е=e,ё=yo,ж=zh,з=z,и=i,й=j,к=k,л=l,м=m,н=n,о=o,п=p,р=r,с=s,т=t,
   у=u,ф=f,х=kh,ц=c,ч=ch,ш=sh,щ=shh,ъ="",ы=y,ь="",э=eh,ю=yu,я=ya):
-  1) First check people.yaml and other_people_keys so you never duplicate an existing ID.
+  1) First check people.yaml (including `aliases` and `nicknames`) and `other_people_keys`
+     (where known nicknames appear in brackets, e.g. `Name [Nick1, Nick2]`) so you recognize
+     people addressed by nickname in speech and never duplicate an existing ID.
   2) Format: <surname>_<firstname> if surname and first name are known (e.g. kuznetsov_andrey,
      petrov_ivan), or <firstname>_<role_or_tag> from the contact (e.g. andrey_sborka_kukhni).
      Put the full readable name in label (never invent an unknown surname).
@@ -48,6 +50,13 @@ For each speaker, set:
   Omit source if neither person nor org is linked.
 - temp: true ONLY for clearly one-off/transient strangers (courier, call-center operator,
   robot, taxi dispatcher, random wrong number) who do not need a catalog card.
+- nicknames: optional list of strings, ONLY for an identified non-temporary person
+  (`person` is set and not `temp: true`) when speech clearly addresses or refers to them
+  by a distinctive, non-standard nickname/moniker not already in their `name` or `nicknames`
+  (use nominative/base form when clear, e.g. `["Кузнец"]`). NEVER include standard
+  diminutives/forms of their first name (e.g. Вова, Серёжа, Лена, Катя, Саша, Дима, Миша),
+  generic/affectionate/kinship terms (брат, дружище, солнышко, зай, котик, мама, папа,
+  шеф, дорогой, мужик, чувак), or phonebook tags. Omit if none.
 - note: optional when `person` or `org` is already linked (omit for straightforward `filename`
   or `owner` matches; add a brief 2–5 word note only if useful, e.g. `Представился (00:00:18)`).
   REQUIRED only when `person: null` and no `org` is linked — keep it ultra-concise (3–6 Russian

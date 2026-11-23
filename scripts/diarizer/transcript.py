@@ -145,6 +145,8 @@ def validate_and_render_md(
         register_catalog(clean_speakers, item, people, orgs)
 
     for sp_key, info in list(clean_speakers.items()):
+        info.pop("nicknames", None)
+        info.pop("nickname", None)
         if "note" in info and (not isinstance(info["note"], str) or not info["note"].strip()):
             if not salvage:
                 raise ValueError(f"invalid note for {sp_key}")

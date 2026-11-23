@@ -320,6 +320,37 @@ class PipelineTests(TemporaryArchive):
         self.assertEqual(md_meta["speakers"]["Робот"]["org"], "beeline")
         self.assertEqual(md_meta["identification"], "complete")
 
+    def test_auto_appends_distinctive_nickname_without_leaking_into_md_or_adding_banal_forms(self):
+        item = self.item("Владимир Смирнов_+70000000108_2026-08-02_12-00-00_incoming.m4a")
+        item["contact"] = "Владимир Смирнов"
+        item["phones"] = ["+70000000108"]
+        people = {
+            "smirnov_vladimir": {"name": "Владимир Смирнов", "phones": ["+70000000108"]},
+        }
+        (self.root / "docs").mkdir(parents=True, exist_ok=True)
+        (self.root / "docs/people.yaml").write_text(
+            yaml.safe_dump({"schema_version": "1.0", "people": people}, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        reply = (
+            'SPEAKERS_JSON: {"Владимир": {"person": "smirnov_vladimir", "source": "speech", '
+            '"nicknames": ["Кузнец", "Вова", "брат", "кузнец", "Владимир"]}, '
+            '"Курьер": {"person": null, "temp": true, "nicknames": ["Быстрый"], "note": "Курьер доставки."}}\n'
+            "[00:00:01.00] **Владимир** Привет.\n"
+            "[00:00:02.00] **Курьер** Доставка."
+        )
+        stats = pipeline.Stats()
+        with mock.patch.object(pipeline, "run_agy", return_value=envelope(reply)), \
+                mock.patch.object(pipeline, "agy_forget"), contextlib.redirect_stdout(io.StringIO()):
+            pipeline.process_short_batch([item], self.args(), people, {}, stats)
+        self.assertEqual(people["smirnov_vladimir"]["nicknames"], ["Кузнец"])
+        disk_doc = yaml.safe_load((self.root / "docs/people.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(disk_doc["schema_version"], "1.1")
+        self.assertEqual(disk_doc["people"]["smirnov_vladimir"]["nicknames"], ["Кузнец"])
+        md_meta = yaml.safe_load(Path(item["target_md"]).read_text(encoding="utf-8").split("---", 2)[1])
+        self.assertNotIn("nicknames", md_meta["speakers"]["Владимир"])
+        self.assertNotIn("nicknames", md_meta["speakers"]["Курьер"])
+
 
 class CheckpointTests(TemporaryArchive):
     def args(self):
@@ -559,14 +590,18 @@ class RuntimeTests(unittest.TestCase):
         people = {f"person_{i}": {"name": f"Контакт {i}", "phones": [f"+7000000{i:04d}"]} for i in range(30)}
         people["ivanov_sergey"] = {"name": "Сергей Иванов", "tags": ["owner"]}
         people["target_p"] = {"name": "Иван Тестов", "phones": ["+70000000104"]}
+        people["nick_match"] = {"name": "Пётр Соколов", "nicknames": ["Сокол"]}
+        people["person_6"]["nicknames"] = ["Кузнец", "Мастер"]
         orgs = {"target_o": {"name": "Такси Пример", "phones": ["+70000000105"]}}
         rendered = json.loads(prompts.format_refs_for_prompt(
-            people, orgs, [{"contact": "Иван", "phones": ["80000000104"]}],
+            people, orgs, [{"contact": "Иван Сокол", "phones": ["80000000104"]}],
         ))
         self.assertIn("ivanov_sergey", rendered["people.yaml"])
         self.assertIn("target_p", rendered["people.yaml"])
+        self.assertIn("nick_match", rendered["people.yaml"])
         self.assertNotIn("person_5", rendered["people.yaml"])
         self.assertEqual(rendered["other_people_keys"]["person_5"], "Контакт 5")
+        self.assertEqual(rendered["other_people_keys"]["person_6"], "Контакт 6 [Кузнец, Мастер]")
         self.assertEqual(rendered["other_orgs_keys"]["target_o"], "Такси Пример")
 
     def test_owner_dotfile_resolution_and_prompt_cache_order(self):

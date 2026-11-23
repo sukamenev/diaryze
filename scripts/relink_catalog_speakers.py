@@ -84,9 +84,11 @@ def _find_person_match(meta: dict, people: dict) -> tuple[str, dict] | None:
             p_forms |= _phone_forms(ep)
         if phones and (phones & p_forms):
             by_phone.append((pid, pinfo))
-        names = {str(pinfo.get("name") or "").strip().lower()} | {
-            str(a).strip().lower() for a in (pinfo.get("aliases") or [])
-        }
+        names = (
+            {str(pinfo.get("name") or "").strip().lower()}
+            | {str(a).strip().lower() for a in (pinfo.get("aliases") or [])}
+            | {str(n).strip().lower() for n in (pinfo.get("nicknames") or [])}
+        )
         names.discard("")
         if contact and contact in names:
             by_contact.append((pid, pinfo))
@@ -106,9 +108,11 @@ def _speaker_matches_entry(sp_key: str, info: dict, pinfo: dict, contact: str) -
         return False
     sp_low = sp_key.strip().lower()
     lbl_low = str(info.get("label") or "").strip().lower()
-    exact_names = {str(pinfo.get("name") or "").strip().lower()} | {
-        str(a).strip().lower() for a in (pinfo.get("aliases") or [])
-    }
+    exact_names = (
+        {str(pinfo.get("name") or "").strip().lower()}
+        | {str(a).strip().lower() for a in (pinfo.get("aliases") or [])}
+        | {str(n).strip().lower() for n in (pinfo.get("nicknames") or [])}
+    )
     if contact:
         exact_names.add(contact.strip().lower())
     exact_names.discard("")
@@ -118,6 +122,8 @@ def _speaker_matches_entry(sp_key: str, info: dict, pinfo: dict, contact: str) -
     entry_toks = _tokens(pinfo.get("name") or "")
     for a in pinfo.get("aliases") or []:
         entry_toks |= _tokens(a)
+    for n in pinfo.get("nicknames") or []:
+        entry_toks |= _tokens(n)
     if contact:
         entry_toks |= _tokens(contact)
 

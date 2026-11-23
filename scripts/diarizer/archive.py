@@ -15,6 +15,9 @@ from .config import AUDIO_EXTENSIONS, EXCLUDED_DIRS, EXCLUDED_FILES, NEEDS_RECOV
 MANIFEST_LOCK = threading.Lock()
 CATALOG_LOCK = threading.Lock()
 
+PEOPLE_CATALOG_SCHEMA_VERSION = "1.1"
+ORGS_CATALOG_SCHEMA_VERSION = "1.0"
+
 RESERVED_CATALOG_KEYS = {
     "unknown", "null", "none", "anonymous", "caller", "callee", "operator", "robot",
     "sobesednik", "speaker", "voice", "golos", "abonent", "zvonyashhij", "vladelec",
@@ -26,6 +29,79 @@ GENERIC_DISPLAY_NAMES = {
     "собеседница", "оператор", "робот", "автоответчик", "автоинформатор",
     "курьер", "клиент", "мужчина", "женщина", "голос", "голосовой секретарь",
 }
+BANAL_NICKNAMES = {
+    "брат", "братан", "братишка", "браток", "сестра", "сестренка",
+    "друг", "дружище", "подруга", "мужик", "чувак", "пацан", "парень", "девушка",
+    "малыш", "малышка", "солнце", "солнышко", "зай", "зайка", "зая", "заяц",
+    "котик", "котенок", "киса", "лапушка", "родной", "родная", "дорогой", "дорогая",
+    "милый", "милая", "любимый", "любимая", "мама", "мамочка", "папа", "папочка",
+    "батя", "отец", "мать", "дед", "дедушка", "бабушка", "бабуля", "сынок", "сын",
+    "дочка", "дочь", "внук", "внучка", "дядя", "тетя", "шеф", "босс", "коллега",
+    "товарищ", "господин", "госпожа", "уважаемый", "уважаемая", "алло", "привет",
+}
+_STANDARD_NAME_GROUPS = (
+    ("александр", "саша", "саня", "сашка", "шура"),
+    ("алексей", "леша", "лешка"),
+    ("анастасия", "настя", "настенька"),
+    ("анатолий", "толя", "толик"),
+    ("андрей", "андрюша", "андрюха"),
+    ("анна", "аня", "анечка", "анюта"),
+    ("антон", "антоша", "тоха"),
+    ("артем", "тема"),
+    ("валентина", "валя"),
+    ("василиса", "вася"),
+    ("вера", "верочка"),
+    ("виктор", "витя", "витек"),
+    ("виктория", "вика"),
+    ("виталий", "виталик"),
+    ("владимир", "вова", "володя", "вовка"),
+    ("вячеслав", "слава", "славик"),
+    ("галина", "галя"),
+    ("георгий", "гоша", "жора"),
+    ("григорий", "гриша"),
+    ("дарья", "даша"),
+    ("денис", "ден", "денек"),
+    ("дмитрий", "дима", "димка", "митя"),
+    ("евгений", "женя", "жека"),
+    ("евгения", "женя"),
+    ("екатерина", "катя", "катюша", "катерина"),
+    ("елена", "лена", "леночка"),
+    ("иван", "ваня", "ванька"),
+    ("игорь", "игорек"),
+    ("ирина", "ира", "ирочка"),
+    ("константин", "костя"),
+    ("ксения", "ксюша", "ксюха"),
+    ("лариса", "лора"),
+    ("любовь", "люба"),
+    ("людмила", "люда", "мила"),
+    ("максим", "макс", "максимка"),
+    ("марина", "мариша"),
+    ("мария", "маша", "машенька", "маруся"),
+    ("михаил", "миша", "мишка"),
+    ("надежда", "надя"),
+    ("наталья", "наталия", "наташа"),
+    ("николай", "коля", "колян"),
+    ("оксана", "ксюша"),
+    ("олег", "олежка"),
+    ("ольга", "оля", "оленька"),
+    ("павел", "паша", "пашка"),
+    ("петр", "петя"),
+    ("полина", "поля"),
+    ("роман", "рома", "ромка"),
+    ("светлана", "света"),
+    ("сергей", "сережа", "серега", "серый"),
+    ("софия", "софья", "соня"),
+    ("станислав", "стас"),
+    ("татьяна", "таня", "танюша"),
+    ("юлия", "юля"),
+    ("юрий", "юра", "юрка"),
+    ("ярослав", "ярик"),
+)
+STANDARD_NAME_DIMINUTIVES: dict[str, set[str]] = {}
+for _group in _STANDARD_NAME_GROUPS:
+    _gset = set(_group)
+    for _form in _group:
+        STANDARD_NAME_DIMINUTIVES.setdefault(_form, set()).update(_gset - {_form})
 
 
 def normalize_phone(raw: str) -> str:
@@ -192,14 +268,58 @@ def load_refs():
 
 def init_catalogs():
     """Seed empty catalogs while preserving files the user already has."""
+    versions = {"people": PEOPLE_CATALOG_SCHEMA_VERSION, "orgs": ORGS_CATALOG_SCHEMA_VERSION}
     with CATALOG_LOCK:
         for path, key in zip(catalog_paths(), ("people", "orgs")):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             try:
                 with open(path, "x", encoding="utf-8") as f:
-                    yaml.safe_dump({"schema_version": "1.0", key: {}}, f, sort_keys=False)
+                    yaml.safe_dump({"schema_version": versions[key], key: {}}, f, sort_keys=False)
             except FileExistsError:
                 continue
+
+
+def _norm_nick(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "").strip().lower()).replace("ё", "е")
+
+
+def _clean_new_nicknames(raw_nicks, entry: dict) -> list[str]:
+    if isinstance(raw_nicks, str):
+        candidates = [raw_nicks]
+    elif isinstance(raw_nicks, (list, tuple)):
+        candidates = raw_nicks
+    else:
+        return []
+
+    blocked = set(BANAL_NICKNAMES) | {_norm_nick(g) for g in GENERIC_DISPLAY_NAMES}
+    name = str(entry.get("name") or "")
+    if name.strip():
+        blocked.add(_norm_nick(name))
+        for tok in re.findall(r"[а-яёa-z0-9]+", _norm_nick(name)):
+            blocked.add(tok)
+            blocked |= STANDARD_NAME_DIMINUTIVES.get(tok, set())
+    for existing in entry.get("nicknames") or []:
+        norm_ex = _norm_nick(existing)
+        if norm_ex:
+            blocked.add(norm_ex)
+
+    added: list[str] = []
+    for cand in candidates:
+        if not isinstance(cand, str):
+            continue
+        cleaned = re.sub(r"\s+", " ", cand.strip())
+        if len(cleaned) < 2 or len(cleaned) > 40:
+            continue
+        if any(ord(c) < 32 for c in cleaned):
+            continue
+        if len(re.findall(r"[а-яёa-z]", cleaned, re.I)) < 2:
+            continue
+        norm = _norm_nick(cleaned)
+        if not norm or norm in blocked:
+            continue
+        blocked.add(norm)
+        added.append(cleaned)
+    return added
 
 
 def _phone_forms(phone: str) -> set[str]:
@@ -232,9 +352,11 @@ def _find_existing_catalog_match(catalog: dict, phones: list[str], names: set[st
             for ep in entry.get("phones") or []:
                 if _phone_forms(ep) & pforms:
                     return k
-        en = {str(entry.get("name") or "").strip().lower()} | {
-            str(a).strip().lower() for a in (entry.get("aliases") or [])
-        }
+        en = (
+            {str(entry.get("name") or "").strip().lower()}
+            | {str(a).strip().lower() for a in (entry.get("aliases") or [])}
+            | {str(n).strip().lower() for n in (entry.get("nicknames") or [])}
+        )
         en.discard("")
         if names and (en & names):
             return k
@@ -243,9 +365,10 @@ def _find_existing_catalog_match(catalog: dict, phones: list[str], names: set[st
 
 def _write_catalog_yaml(path: str, root_key: str, data: dict):
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    version = PEOPLE_CATALOG_SCHEMA_VERSION if root_key == "people" else ORGS_CATALOG_SCHEMA_VERSION
     tmp = path + ".part"
     with open(tmp, "w", encoding="utf-8") as f:
-        yaml.safe_dump({"schema_version": "1.0", root_key: data}, f, allow_unicode=True, sort_keys=False, width=1000)
+        yaml.safe_dump({"schema_version": version, root_key: data}, f, allow_unicode=True, sort_keys=False, width=1000)
     os.replace(tmp, path)
 
 
@@ -320,6 +443,22 @@ def register_catalog_entries(speakers: dict, item: dict, people: dict, orgs: dic
                         new_entry["notes"] = f"Добавлено автоматически из {item.get('audio_rel')}."
                         people[pid] = new_entry
                         people_dirty = True
+
+            resolved_pid = info.get("person")
+            raw_nicks = info.get("nicknames") if "nicknames" in info else info.get("nickname")
+            if (
+                not info.get("temp")
+                and isinstance(resolved_pid, str)
+                and resolved_pid in people
+                and isinstance(people[resolved_pid], dict)
+                and raw_nicks
+            ):
+                new_nicks = _clean_new_nicknames(raw_nicks, people[resolved_pid])
+                if new_nicks:
+                    cur = list(people[resolved_pid].get("nicknames") or [])
+                    cur.extend(new_nicks)
+                    people[resolved_pid]["nicknames"] = cur
+                    people_dirty = True
 
             oid = info.get("org")
             if info.get("role") == "robot" and isinstance(oid, str) and oid not in orgs and _valid_new_catalog_key(oid):
