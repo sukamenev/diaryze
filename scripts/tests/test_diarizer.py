@@ -545,7 +545,7 @@ class RuntimeTests(unittest.TestCase):
             cli.main()
         self.assertEqual(
             rw.call_args.args[0].model_chain,
-            ["gemini-4-hydrogen-medium", "gemini-3.8-flash-medium", "gemini-4-argon-low"],
+            ["gemini-4-hydrogen-medium", "gemini-3.8-flash-medium"],
         )
 
     def test_recorder_hint_does_not_assume_phone_owner_or_two_people(self):

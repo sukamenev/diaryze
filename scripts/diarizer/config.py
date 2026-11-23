@@ -125,4 +125,4 @@ UNAVAILABLE_503_PAT = re.compile(
 )
 
 
-DEFAULT_FALLBACK_MODELS = "gemini-3.8-flash-medium,gemini-4-argon-low"
+DEFAULT_FALLBACK_MODELS = "gemini-3.8-flash-medium"
