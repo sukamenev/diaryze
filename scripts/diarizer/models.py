@@ -14,12 +14,14 @@ from .runtime import STOP_EVENT
 
 
 class ModelCooldowns:
+    # Initialize the shared model cooldown and failure registry.
     def __init__(self):
         self._until = {}
         self._disabled = {}
         self._streak = {}
         self._lock = threading.Lock()
 
+    # Clear expired cooldowns and their failure streaks under the registry lock.
     def _expire_locked(self, now):
         """Start a fresh error streak after a cooldown; caller holds _lock."""
         for model, until in list(self._until.items()):
@@ -27,6 +29,7 @@ class ModelCooldowns:
                 self._until.pop(model)
                 self._streak.pop(model, None)
 
+    # Return the time left on a model's cooldown.
     def remaining(self, model):
         with self._lock:
             now = time.monotonic()
@@ -35,11 +38,13 @@ class ModelCooldowns:
                 return math.inf
             return max(0, self._until.get(model, 0) - now)
 
+    # Clear a model's failure streak after a successful request.
     def success(self, model):
         # An in-flight success must not cancel a pause recorded by another worker.
         with self._lock:
             self._streak.pop(model, None)
 
+    # Pause new requests to a model and report when it can be used again.
     def block(self, model, *, kind="503", seconds=None, items=(), scope=""):
         seconds = MODEL_ERROR_POLICIES[kind]['cooldown_s'] if seconds is None else seconds
         with self._lock:
@@ -55,6 +60,7 @@ class ModelCooldowns:
         emit(f"[WARN] {prefix}{LABELS[kind]} на {model}; пауза {math.ceil(seconds)} с "
              f"для всех работников (до {resume_at:%H:%M:%S %z})")
 
+    # Apply the shared failure policy for a model and return its error category.
     def failed(self, model, error, *, items=(), scope=""):
         kind = classify_error(error)
         policy = MODEL_ERROR_POLICIES[kind]
@@ -79,6 +85,7 @@ class ModelCooldowns:
             self.block(model, kind=kind, seconds=seconds, items=items, scope=scope)
         return kind
 
+    # Pick an eligible model or wait for the next cooldown to expire.
     def select(self, chain, *, preferred=0, excluded=(), items=()):
         """Choose an available model, or interruptibly wait for the earliest expiry.
 
@@ -127,6 +134,7 @@ class ModelCooldowns:
 class ModelAttempts:
     """Eligibility for one recording/batch; shared pauses live in the registry."""
 
+    # Track model attempts and exclusions for a single task.
     def __init__(self, chain, registry, items, *, stop_on_quota=False):
         self.chain = chain
         self.registry = registry
@@ -136,6 +144,7 @@ class ModelAttempts:
         self.tried = []
         self.errors = {}
 
+    # Find the next eligible model or explain why this task has exhausted the chain.
     def select(self, preferred=0):
         try:
             return self.registry.select(self.chain, preferred=preferred,
@@ -148,11 +157,13 @@ class ModelAttempts:
                 raise ModelRefused(details, self.tried) from exc
             raise ModelTaskFailed("Цепочка моделей не обработала задание: " + details) from exc
 
+    # Remember which models actually received a request for this task.
     def started(self, index):
         model = self.chain[index]
         if model not in self.tried:
             self.tried.append(model)
 
+    # Record a task failure and select the next model under the configured policy.
     def failed(self, index, error, *, scope=""):
         model = self.chain[index]
         kind = self.registry.failed(model, error, items=self.items, scope=scope)

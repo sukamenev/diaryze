@@ -19,20 +19,24 @@ else:
     from diarizer.config import EXCLUDED_FILES, ROOT, TZ
 
 
+# Capture the file identity and metadata used to detect concurrent changes.
 def fingerprint(path):
     st = path.stat()
     return [st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns]
 
 
+# Hash the source so mtime corrections can be verified byte for byte.
 def digest(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+# Format a nanosecond timestamp in the archive's time zone.
 def iso(ns):
     return datetime.fromtimestamp(ns / 10**9, TZ).isoformat()
 
 
+# Compare mtime, filename date, and embedded dates to assess a possible correction.
 def audit_one(path, threshold):
     rel = path.relative_to(ROOT).as_posix()
     result = {'schema_version': '1.0', 'audio': rel}
@@ -91,9 +95,11 @@ def audit_one(path, threshold):
         return dict(result, status='error', error=str(exc))
 
 
+# Recheck corroborated files and journal their mtime changes.
 def apply_rows(rows, journal_path):
     counts = Counter()
     with journal_path.open('x', encoding='utf-8') as journal:
+        # Flush each journal entry to disk before proceeding.
         def write(row):
             journal.write(json.dumps(row, ensure_ascii=False) + '\n')
             journal.flush()
@@ -127,6 +133,7 @@ def apply_rows(rows, journal_path):
     return dict(counts)
 
 
+# Parse audit options and run the scan or apply a saved plan.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--folder', default='.', help='Archive folder to audit')

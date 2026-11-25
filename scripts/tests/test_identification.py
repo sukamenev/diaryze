@@ -22,9 +22,11 @@ CONFIRMED = {"person": "known_person", "source": "speech", "note": "Предст
 
 
 class IdentificationTests(unittest.TestCase):
+    # Evaluate speaker identification with the shared person and organization fixtures.
     def assess(self, speakers, **kwargs):
         return identification_status(speakers, PEOPLE, ORGS, **kwargs)
 
+    # Check that status reflects which declared speakers have catalog links.
     def test_partial_and_complete_statuses_reflect_linked_speakers(self):
         speakers = {"Сергей": CONFIRMED, "Иван": {"person": None}}
         self.assertEqual(self.assess(speakers), "partial")
@@ -33,6 +35,7 @@ class IdentificationTests(unittest.TestCase):
         speakers["Иван"] = {"person": "known_person", "source": "user", "note": "Подтверждено."}
         self.assertEqual(self.assess(speakers), "complete")
 
+    # Check that filename evidence can identify a known person and invalid links are excluded.
     def test_filename_confirms_known_person_while_missing_source_or_unknown_do_not(self):
         guessed = {"person": "known_person", "source": "filename"}
         self.assertEqual(self.assess({"Сергей": guessed}), "complete")
@@ -43,6 +46,7 @@ class IdentificationTests(unittest.TestCase):
         self.assertEqual(self.assess({"Сергей": {"person": "missing", "source": "filename"}}), "unresolved")
         self.assertEqual(self.assess({"Гость": {"person": None, "source": "speech", "note": "Неизвестный."}}), "unresolved")
 
+    # Check that unresolved speaker keys affect status while inline question marks are ignored.
     def test_unmapped_and_ambiguous_voices_block_complete_status_except_question_mark(self):
         self.assertEqual(self.assess({"Сергей": CONFIRMED}, used_speakers={"Сергей", "Иван"}), "partial")
         self.assertEqual(self.assess({"Сергей": CONFIRMED}, used_speakers={"Сергей", "?"}), "complete")
@@ -50,6 +54,7 @@ class IdentificationTests(unittest.TestCase):
         self.assertEqual(self.assess({}, no_speech=True), "not_applicable")
         self.assertEqual(self.assess({}, no_speech=True, used_speakers={"Сергей"}), "unresolved")
 
+    # Check that an organization affiliation alone cannot identify a human.
     def test_organization_does_not_identify_an_unnamed_human(self):
         info = {"org": "known_org", "source": "speech", "role": "operator", "temp": True,
                 "note": "Оператор назвал организацию, но не представился."}
@@ -57,6 +62,7 @@ class IdentificationTests(unittest.TestCase):
         info["role"] = "robot"
         self.assertEqual(self.assess({"Оператор": info}), "complete")
 
+    # Check that new Markdown includes the computed status and expected schema fields.
     def test_new_transcript_has_computed_status_and_schema_2_fields(self):
         item = {"audio_rel": "Recordings/test.wav", "sha256": "a" * 64, "duration_ms": 5000}
         for speakers, expected in (({"Голос 1": {"person": None}}, "unresolved"),
@@ -83,6 +89,7 @@ class IdentificationTests(unittest.TestCase):
 
 
 class MigrationTests(unittest.TestCase):
+    # Build legacy Markdown with comments and transcript text for migration tests.
     def sample(self, newline=b"\n"):
         raw = '''---
 schema_version: '1.0' # keep this comment
@@ -106,6 +113,7 @@ speakers:
 '''.encode()
         return raw.replace(b"\n", newline)
 
+    # Check that migration changes only the schema and identification fields.
     def test_patch_preserves_every_byte_except_the_two_root_fields(self):
         for newline in (b"\n", b"\r\n"):
             raw = self.sample(newline)
@@ -116,10 +124,12 @@ speakers:
             self.assertEqual(status, "partial")
             self.assertEqual(patch_markdown(changed, PEOPLE, ORGS), (changed, status))
 
+    # Check that migration rejects future schema versions.
     def test_unknown_future_schema_is_not_downgraded(self):
         with self.assertRaises(ValueError):
             patch_markdown(self.sample().replace(b"'1.0'", b"'3.0'"), PEOPLE, ORGS)
 
+    # Check that the migration updates the index and a second application makes no changes.
     def test_apply_updates_index_and_second_run_is_a_noop(self):
         with tempfile.TemporaryDirectory(prefix="identity-migration-test-") as tmp:
             root = Path(tmp)
@@ -150,6 +160,7 @@ speakers:
             self.assertEqual((result["updated"], result["unchanged"], result["manifest_updated"]), (0, 1, 0))
             self.assertEqual(before, (path.read_bytes(), manifest.read_bytes()))
 
+    # Check that catalog relinking uses contact evidence and preserves speech-based links.
     def test_relink_catalog_speakers_links_matching_contact_without_overwriting_speech(self):
         people = {
             "ivanov_sergey": {"name": "Иванов Сергей"},
@@ -185,6 +196,7 @@ speakers:
         self.assertEqual(status, "complete")
         self.assertEqual(relink_markdown_speakers(fixed, people, {})[0], fixed)
 
+    # Check that a known nickname can match an unlinked speaker.
     def test_relink_catalog_speakers_matches_nicknames(self):
         people = {
             "ivanov_sergey": {"name": "Иванов Сергей"},
@@ -217,6 +229,7 @@ speakers:
         self.assertEqual(meta["speakers"]["Кузнец"]["source"], "filename")
         self.assertEqual(status, "complete")
 
+    # Check that date sync uses recorded metadata or the filename and is idempotent.
     def test_sync_md_dates_sets_mtime_from_recorded_at_and_filename_idempotently(self):
         with tempfile.TemporaryDirectory(prefix="md-dates-test-") as tmp:
             root = Path(tmp)

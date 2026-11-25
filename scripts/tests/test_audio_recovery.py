@@ -20,6 +20,7 @@ MEDIA_ERROR = ('INVALID_ARGUMENT (code 400): Unable to process input: '
 
 @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'ffmpeg/ffprobe required')
 class StrictAudioTests(TemporaryArchive):
+    # Generate a playable AAC fixture and return its recording metadata.
     def generate_aac(self):
         reference = self.item('reference.m4a')
         p = audio.run_capture([
@@ -38,6 +39,7 @@ class StrictAudioTests(TemporaryArchive):
         first_frame = data[pos:pos + size]
         return reference, data, pos, size, first_frame
 
+    # Build an interrupted recording fixture with a missing movie index.
     def interrupted(self, data):
         offset = 0
         while data[offset + 4:offset + 8] != b'moov':
@@ -49,6 +51,7 @@ class StrictAudioTests(TemporaryArchive):
         Path(item['audio_abs']).write_bytes(data[:offset])
         return item
 
+    # Check that recovery retains the initial AAC frame even when the decoder delays output.
     def test_first_frame_with_decoder_delay_is_preserved_and_decodes(self):
         if not audio._get_libfaad():
             self.skipTest('FAAD2 required')
@@ -66,6 +69,7 @@ class StrictAudioTests(TemporaryArchive):
         self.assertAlmostEqual(ready['duration_ms'], 500, delta=100)
         self.assertEqual(archive.sha256_file(item['audio_abs']), digest)
 
+    # Check that an invalid FAAD result leaves container recovery available.
     def test_rejected_faad_output_continues_to_untrunc(self):
         if not audio._get_libfaad():
             self.skipTest('FAAD2 required')
@@ -75,6 +79,7 @@ class StrictAudioTests(TemporaryArchive):
         work.mkdir()
         decode = audio.decode_audio_error
 
+        # Reject the simulated FAAD output and decode other paths normally.
         def validate(path):
             if Path(path).name == 'faad_recovered.m4a':
                 return 'audio decode failed: damaged AAC'
@@ -87,6 +92,7 @@ class StrictAudioTests(TemporaryArchive):
         self.assertIsNone(error)
         self.assertIsNone(decode(ready['clean_abs']))
 
+    # Check that an audio stream that fails strict decoding never reaches the model.
     def test_readable_container_with_bad_aac_is_not_sent_to_model(self):
         _, data, pos, size, _ = self.generate_aac()
         item = self.item('corrupted.m4a')
@@ -106,6 +112,7 @@ class StrictAudioTests(TemporaryArchive):
         self.assertEqual(state['sha256'], archive.sha256_file(item['audio_abs']))
         self.assertEqual(stats.needs_recovery, 1)
 
+    # Check that a repaired container is accepted only if its audio decodes.
     def test_untrunc_output_requires_decodable_audio(self):
         _, data, pos, size, _ = self.generate_aac()
         item = self.interrupted(data)
@@ -114,6 +121,7 @@ class StrictAudioTests(TemporaryArchive):
         work.mkdir()
         capture = audio.run_capture
 
+        # Simulate untrunc producing broken media while running other commands normally.
         def run(cmd, **kwargs):
             if cmd[0] == 'test-untrunc':
                 Path(cmd[cmd.index('-dst') + 1]).write_bytes(broken)
@@ -123,6 +131,7 @@ class StrictAudioTests(TemporaryArchive):
         with mock.patch.object(audio, 'run_capture', side_effect=run):
             self.assertEqual(audio.untrunc_recover(item['audio_abs'], str(work), 'test-untrunc'), (None, None))
 
+    # Check that cancellation during audio preparation does not mark the source as damaged.
     def test_cancelled_decode_does_not_mark_source_as_damaged(self):
         reference, *_ = self.generate_aac()
         args = SimpleNamespace(max_single_sec=20, chunk_sec=10, overlap_sec=0,
@@ -135,6 +144,7 @@ class StrictAudioTests(TemporaryArchive):
 
 
 class MediaRejectionTests(TemporaryArchive):
+    # Set up the model chain and job options for media rejection tests.
     def setUp(self):
         super().setUp()
         self.args = SimpleNamespace(model='first', model_chain=['first', 'second', 'third'],
@@ -147,12 +157,14 @@ class MediaRejectionTests(TemporaryArchive):
         output.__enter__()
         self.addCleanup(output.__exit__, None, None, None)
 
+    # Run a job with mocked audio preparation and provider responses.
     def run_job(self, items, responses):
         with mock.patch.object(pipeline, 'prepare_audio_work', side_effect=[(it, None) for it in items]), \
                 mock.patch.object(pipeline, 'run_agy', side_effect=responses) as run:
             pipeline.run_job(items, self.args, self.stats)
         return run
 
+    # Check that a model media rejection requests recovery without switching models.
     def test_single_media_error_marks_recovery_without_model_fallback(self):
         bad = dict(self.item('bad.m4a'), parts=None)
         rejected = (*failure(MEDIA_ERROR)[:3], '/tmp/isolated-agy-test')
@@ -174,6 +186,7 @@ class MediaRejectionTests(TemporaryArchive):
         self.assertEqual(run.call_args.args[1], 'first')
         self.assertEqual(self.stats.done, 1)
 
+    # Check that a batch rejection allows individual retries and publication of healthy audio.
     def test_batch_is_split_and_healthy_file_is_published(self):
         good, bad = [dict(self.item(name), parts=None) for name in ('good.m4a', 'bad.m4a')]
         run = self.run_job([good, bad], [failure(MEDIA_ERROR), envelope(REPLY), failure(MEDIA_ERROR)])
@@ -186,6 +199,7 @@ class MediaRejectionTests(TemporaryArchive):
         self.assertEqual(state[good['audio_rel']]['status'], 'done')
         self.assertEqual(state[bad['audio_rel']]['status'], 'needs_recovery')
 
+    # Check that a later media rejection retains accepted parts without publishing a partial file.
     def test_long_media_error_keeps_checkpoint_without_publishing_partial_md(self):
         item = self.item('long.m4a', duration=10000)
         item['parts'] = [

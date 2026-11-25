@@ -18,6 +18,7 @@ QUOTA_WAIT_LOCK = threading.Lock()
 _LAST_QUOTA_WAIT_DONE = [0.0]
 
 
+# Read a provider reset time or use the configured fallback delay.
 def quota_wait_seconds(err_msg: str, now: datetime | None = None) -> int:
     """Wait until an absolute reset or a `Resets in 2h11m10s` duration."""
     now = now if now is not None else datetime.now(timezone.utc)
@@ -44,6 +45,7 @@ def quota_wait_seconds(err_msg: str, now: datetime | None = None) -> int:
     return MODEL_ERROR_POLICIES['quota']['cooldown_s']
 
 
+# Coordinate an interruptible quota pause across workers.
 def wait_for_quota_reset(err_msg: str):
     """Coordinate across worker threads to sleep when rate/quota limit is hit."""
     hit_at = time.monotonic()

@@ -11,6 +11,7 @@ import time
 from .runtime import FORCE_STOP_EVENT
 
 
+# Read process ancestry and group IDs for descendant cleanup.
 def _process_table():
     if sys.platform == "darwin":
         try:
@@ -34,6 +35,7 @@ def _process_table():
             continue
 
 
+# Find process groups containing descendants, including detached sessions.
 def _child_groups(parent_pid):
     """Include detached descendants, such as sudo's PTY command session."""
     children = {}
@@ -49,9 +51,11 @@ def _child_groups(parent_pid):
     return {group for group in groups if group > 0 and group != os.getpgrp()}
 
 
+# Stop the subprocess and its descendant groups.
 def terminate_tree(proc, grace=1.0):
     groups = _child_groups(proc.pid)
 
+    # Send a termination signal to each group in the subprocess tree.
     def send(sig):
         for group in groups:
             try:
@@ -72,6 +76,7 @@ def terminate_tree(proc, grace=1.0):
         pass
 
 
+# Track a subprocess and clean up its tree when the context exits.
 @contextmanager
 def managed_process(args, **kwargs):
     if FORCE_STOP_EVENT.is_set():
@@ -87,6 +92,7 @@ def managed_process(args, **kwargs):
                 stream.close()
 
 
+# Capture subprocess output with cancellation, timeout, and completion checks.
 def run_capture(args, *, input=None, timeout=None, finish_when=None,
                 finish_grace=10.0, capture_output=True, text=True, **kwargs):
     """Like subprocess.run, but no terminal input, and force-stop aware."""

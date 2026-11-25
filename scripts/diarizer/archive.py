@@ -104,6 +104,7 @@ for _group in _STANDARD_NAME_GROUPS:
         STANDARD_NAME_DIMINUTIVES.setdefault(_form, set()).update(_gset - {_form})
 
 
+# Canonicalize phone numbers for comparison with archive contacts.
 def normalize_phone(raw: str) -> str:
     digits = re.sub(r"[^\d+]", "", raw)
     if digits.startswith("8") and len(digits) == 11:
@@ -116,6 +117,7 @@ def normalize_phone(raw: str) -> str:
 _DIRECTION_MAP = {"incoming": "in", "outgoing": "out", "in": "in", "out": "out"}
 
 
+# Extract recording time, contact, phone numbers, and direction from the name.
 def parse_filename(fn: str):
     m = re.match(
         r"^(?P<contact>.+?)_(?P<phone>[^_]+)_(?P<date>\d{4}-\d{2}-\d{2})_"
@@ -141,6 +143,7 @@ def parse_filename(fn: str):
     return dt, direction, contact, phones
 
 
+# Recognize date patterns used by recorders, WhatsApp, and Android.
 def parse_other_filename(fn):
     """Recorder/MIUI, WhatsApp dates and Android epoch names; never use mtime as date."""
     vrf = re.fullmatch(r"[01]d(\d{14})p(.+?)(?:_(incoming|outgoing))?\.[^.]+", fn)
@@ -176,6 +179,7 @@ def parse_other_filename(fn):
     return None, None, None, []
 
 
+# Resolve a requested folder within the allowed archive tree.
 def resolve_source_dir(folder):
     root = os.path.realpath(config.ROOT)
     path = os.path.realpath(os.path.join(root, os.path.expanduser(folder)))
@@ -189,6 +193,7 @@ def resolve_source_dir(folder):
     return path
 
 
+# Screen file names and headers for inputs worth probing for audio.
 def is_audio_candidate(path):
     """Extensions plus common signatures; ffprobe later verifies an audio stream."""
     ext = os.path.splitext(path)[1].lower()
@@ -205,6 +210,7 @@ def is_audio_candidate(path):
             or head[4:8] in {b"ftyp", b"mdat"})
 
 
+# Hash an audio file without reading it all into memory.
 def sha256_file(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -213,11 +219,13 @@ def sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
+# Recognize archive folders that should be skipped during scanning.
 def is_excluded_dir(name: str) -> bool:
     low = name.lower()
     return low in EXCLUDED_DIRS or "trash" in low or "корзин" in low
 
 
+# Index the most recent manifest entry for each recording.
 def load_manifest_state():
     """Return latest status map {audio_rel: entry} from manifest.jsonl."""
     state = {}
@@ -238,6 +246,7 @@ def load_manifest_state():
     return state
 
 
+# Append a status entry under the shared manifest lock.
 def append_manifest(entry: dict):
     manifest = os.path.join(config.ROOT, "docs", "manifest.jsonl")
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
@@ -245,11 +254,13 @@ def append_manifest(entry: dict):
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+# Locate the people and organization catalogs within the archive.
 def catalog_paths():
     directory = os.path.join(config.ROOT, "docs")
     return os.path.join(directory, "people.yaml"), os.path.join(directory, "orgs.yaml")
 
 
+# Read and validate a catalog or return an empty index if it is absent.
 def _load_catalog(path, key):
     try:
         with open(path, encoding="utf-8") as f:
@@ -261,11 +272,13 @@ def _load_catalog(path, key):
     return data[key]
 
 
+# Load both catalogs for prompt references and validation.
 def load_refs():
     people_path, orgs_path = catalog_paths()
     return _load_catalog(people_path, "people"), _load_catalog(orgs_path, "orgs")
 
 
+# Create empty catalog files only where the archive lacks them.
 def init_catalogs():
     """Seed empty catalogs while preserving files the user already has."""
     versions = {"people": PEOPLE_CATALOG_SCHEMA_VERSION, "orgs": ORGS_CATALOG_SCHEMA_VERSION}
@@ -279,10 +292,12 @@ def init_catalogs():
                 continue
 
 
+# Normalize a nickname for case-insensitive comparisons.
 def _norm_nick(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "").strip().lower()).replace("ё", "е")
 
 
+# Filter out duplicate, generic, and ordinary diminutive nickname suggestions.
 def _clean_new_nicknames(raw_nicks, entry: dict) -> list[str]:
     if isinstance(raw_nicks, str):
         candidates = [raw_nicks]
@@ -322,6 +337,7 @@ def _clean_new_nicknames(raw_nicks, entry: dict) -> list[str]:
     return added
 
 
+# Build comparable digit forms for a contact number.
 def _phone_forms(phone: str) -> set[str]:
     digits = re.sub(r"\D+", "", str(phone or ""))
     if not digits:
@@ -332,6 +348,7 @@ def _phone_forms(phone: str) -> set[str]:
     return forms
 
 
+# Check whether a proposed ID follows the catalog naming rules.
 def _valid_new_catalog_key(key: str) -> bool:
     return (
         isinstance(key, str)
@@ -341,6 +358,7 @@ def _valid_new_catalog_key(key: str) -> bool:
     )
 
 
+# Find an existing card by label, alias, nickname, or phone number.
 def _find_existing_catalog_match(catalog: dict, phones: list[str], names: set[str]) -> str | None:
     pforms = set()
     for p in phones:
@@ -363,6 +381,7 @@ def _find_existing_catalog_match(catalog: dict, phones: list[str], names: set[st
     return None
 
 
+# Replace a catalog atomically with its updated entries.
 def _write_catalog_yaml(path: str, root_key: str, data: dict):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     version = PEOPLE_CATALOG_SCHEMA_VERSION if root_key == "people" else ORGS_CATALOG_SCHEMA_VERSION
@@ -372,6 +391,7 @@ def _write_catalog_yaml(path: str, root_key: str, data: dict):
     os.replace(tmp, path)
 
 
+# Reconcile model-proposed links and nicknames with the current catalogs.
 def register_catalog_entries(speakers: dict, item: dict, people: dict, orgs: dict):
     """Thread-safely register valid new GOST person/org IDs into people.yaml / orgs.yaml."""
     if not isinstance(speakers, dict):
@@ -490,6 +510,7 @@ def register_catalog_entries(speakers: dict, item: dict, people: dict, orgs: dic
             _write_catalog_yaml(o_path, "orgs", orgs)
 
 
+# Check a transcript's stored digest against the current audio.
 def md_has_matching_sha(md_path: str, audio_sha: str) -> bool:
     try:
         with open(md_path, encoding="utf-8") as f:
@@ -503,6 +524,7 @@ def md_has_matching_sha(md_path: str, audio_sha: str) -> bool:
         return False
 
 
+# Find recordings whose transcripts or terminal statuses are still outstanding.
 def scan_pending(subdir: str = ".", retry_skipped: bool = False, retry_refused: bool = False,
                  *, retry_recovery: bool = False):
     """Scan subdir newest-first for audio files without a matching MD or terminal status."""
@@ -560,6 +582,7 @@ def scan_pending(subdir: str = ".", retry_skipped: bool = False, retry_refused: 
     return cands
 
 
+# Derive the transcript modification time from the recording date.
 def recorded_mtime_ns(recorded_at, *, audio_rel: str | None = None) -> int | None:
     """Return nanosecond Unix timestamp from recorded_at (or filename fallback), or None."""
     raw = str(recorded_at or "").strip()
@@ -580,6 +603,7 @@ def recorded_mtime_ns(recorded_at, *, audio_rel: str | None = None) -> int | Non
         return None
 
 
+# Align the file's mtime with the recording time while preserving atime.
 def sync_file_mtime(path: str | os.PathLike, recorded_at, *, audio_rel: str | None = None, fallback_ns: int | None = None) -> int | None:
     """Set filesystem mtime from recorded_at (or fallback_ns), preserving atime."""
     target_ns = recorded_mtime_ns(recorded_at, audio_rel=audio_rel)
@@ -592,6 +616,7 @@ def sync_file_mtime(path: str | os.PathLike, recorded_at, *, audio_rel: str | No
     return target_ns
 
 
+# Publish a validated transcript and record its completion in the manifest.
 def publish_md(item: dict, md_content: str, model: str):
     meta = yaml.safe_load(md_content.split("---", 2)[1]) or {}
     target = item["target_md"]

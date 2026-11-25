@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = os.getcwd()
 
 
+# Set the shared archive paths for a CLI run.
 @contextmanager
 def use_archive(root):
     """Select the archive for the lifetime of one CLI run."""

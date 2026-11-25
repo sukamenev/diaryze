@@ -17,11 +17,13 @@ else:
     from diarizer.config import EXCLUDED_FILES, ROOT
 
 
+# Capture file metadata to detect changes during the duplicate scan.
 def signature(path):
     st = path.stat()
     return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
 
 
+# Compare candidate files byte for byte before declaring a duplicate.
 def same_bytes(left, right):
     with left.open('rb') as a, right.open('rb') as b:
         while True:
@@ -32,6 +34,7 @@ def same_bytes(left, right):
                 return True
 
 
+# Find identical audio files using size, hash, and byte comparisons.
 def audit(root):
     root = Path(root).resolve()
     sizes = defaultdict(list)
@@ -93,6 +96,7 @@ def audit(root):
     return stable, {'schema_version': '1.0', 'candidates': len(inventory), 'hashed': hashed, 'failures': failures}
 
 
+# Run a read-only duplicate audit and write its reports.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', help='New report directory (default: work/reports/duplicates/<timestamp>)')

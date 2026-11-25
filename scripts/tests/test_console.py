@@ -19,10 +19,12 @@ from scripts.diarizer import console, pipeline, runtime
 
 
 class TtyBuffer(io.StringIO):
+    # Make the in-memory stream behave like terminal output.
     def isatty(self):
         return True
 
 
+# Reconstruct visible rows from the console renderer's terminal controls.
 def screen_lines(text, width=300):
     """Interpret the small set of terminal controls used by the console renderer."""
     rows, row, col = [""], 0, 0
@@ -54,6 +56,7 @@ def screen_lines(text, width=300):
 
 
 class ConsoleTests(unittest.TestCase):
+    # Prepare a representative transcript and statistics for rendering tests.
     def setUp(self):
         self.item = {"target_md": "/archive/Text/Phone/2026/Пример звонка.m4a.md",
                      "duration_ms": 186000, "dt": "2026-09-20T15:52:00"}
@@ -63,9 +66,11 @@ class ConsoleTests(unittest.TestCase):
                       "tok_in": 7000, "tok_cache": 0, "tok_out": 5000}
         self.now = datetime(2026, 11, 15, 22, 43, 45, tzinfo=timezone.utc)
 
+    # Render the fixture with the requested console options.
     def render(self, **kwargs):
         return render_completed(self.item, self.meta, self.stats, now=self.now, **kwargs)
 
+    # Check the placement of timestamps, transcript paths, and processing speeds.
     def test_plain_block_has_one_timestamp_full_path_and_speed_multiplier(self):
         text = self.render(color=False)
         self.assertEqual(len(text.splitlines()), 3)
@@ -77,6 +82,7 @@ class ConsoleTests(unittest.TestCase):
         for absent in ("=", "m/h", "\x1b", "пропуски", "отказы", "ошибки"):
             self.assertNotIn(absent, text)
 
+    # Check that counters and notes are visible within the standard completion block.
     def test_nonzero_counters_and_notes_stand_out_without_extra_lines(self):
         self.stats.update(skipped=1, refused=2, errors=3)
         self.meta["notes"] = "Требуется проверка.\nВторая строка."
@@ -88,6 +94,7 @@ class ConsoleTests(unittest.TestCase):
         plain = re.sub(r"\x1b\[[0-9;]*m", "", text)
         self.assertEqual(plain, self.render(color=False))
 
+    # Check that terminal detection and color overrides control styling.
     def test_color_requires_tty_and_respects_no_color_and_dumb(self):
         with mock.patch.dict(os.environ, {"TERM": "xterm-256color"}, clear=True):
             with contextlib.redirect_stdout(TtyBuffer()):
@@ -99,6 +106,7 @@ class ConsoleTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"TERM": "dumb"}), contextlib.redirect_stdout(TtyBuffer()):
                 self.assertNotIn("\x1b", self.render())
 
+    # Check that transcript labels cannot inject terminal escape commands.
     def test_untrusted_names_cannot_inject_terminal_commands(self):
         self.meta["speakers"]["S1"]["label"] = "Имя\x1b[2J\r\n"
         text = self.render(color=False)
@@ -106,12 +114,14 @@ class ConsoleTests(unittest.TestCase):
         self.assertNotIn("\x1b", text)
         self.assertIn("Имя\\x1b[2J\\x0d\\x0a", text)
 
+    # Check that identification status fits in the existing completion block.
     def test_identification_status_is_visible_without_adding_a_line(self):
         self.meta["identification"] = "partial"
         text = self.render(color=False)
         self.assertEqual(len(text.splitlines()), 3)
         self.assertIn("Участники: частично", text.splitlines()[1])
 
+    # Check that the final summary uses human-readable elapsed times.
     def test_final_summary_uses_hours_minutes_and_seconds_without_equals(self):
         self.stats.update(done=158, audio_ms=25428000, elapsed_s=1514)
         text = render_finished(self.stats, stopped=True, color=False)
@@ -124,8 +134,10 @@ class ConsoleTests(unittest.TestCase):
         self.stats["elapsed_s"] = 3605
         self.assertIn("время работы 1 ч 00 мин 05 с", render_finished(self.stats, color=False))
 
+    # Check that concurrent writers emit complete blocks without interleaving.
     def test_worker_blocks_do_not_interleave(self):
         class SlowBuffer(io.StringIO):
+            # Write slowly enough to expose interleaving if the output lock fails.
             def write(self, text):
                 for char in text:
                     super().write(char)
@@ -136,6 +148,7 @@ class ConsoleTests(unittest.TestCase):
         barrier = threading.Barrier(2)
         blocks = ["first\n  first details\n  first totals", "second\n  second details\n  second totals"]
 
+        # Start concurrent writes together to exercise output locking.
         def report(block):
             barrier.wait(timeout=3)
             emit(block, file=stream)
@@ -146,6 +159,7 @@ class ConsoleTests(unittest.TestCase):
 
 
 class LiveConsoleTests(unittest.TestCase):
+    # Reset runtime state and prepare streams for live-progress tests.
     def setUp(self):
         runtime.STOP_EVENT.clear()
         runtime.CONSOLE_INTERRUPTED.clear()
@@ -158,6 +172,7 @@ class LiveConsoleTests(unittest.TestCase):
                       'skipped': 0, 'refused': 0, 'errors': 0,
                       'tok_in': 10000, 'tok_cache': 5000, 'tok_out': 3000}
 
+    # Check that each progress update replaces the previous one while records remain visible.
     def test_only_latest_progress_is_visible_and_record_blocks_remain(self):
         output = TtyBuffer()
         with mock.patch.dict(os.environ, {'TERM': 'xterm'}, clear=True), \
@@ -172,6 +187,7 @@ class LiveConsoleTests(unittest.TestCase):
             self.assertNotIn('Готово 1', '\n'.join(lines))
             self.assertIn('Готово 2', lines[-1])
 
+    # Check that warnings appear above progress and the final summary clears the live row.
     def test_warning_is_printed_above_status_and_final_summary_replaces_status(self):
         output = TtyBuffer()
         with mock.patch.dict(os.environ, {'TERM': 'xterm'}, clear=True), \
@@ -188,6 +204,7 @@ class LiveConsoleTests(unittest.TestCase):
             self.assertEqual(sum('Готово' in line for line in after), 1)
             self.assertEqual(sum('[WARN]' in line for line in after), 1)
 
+    # Check that pipes and dumb terminals receive plain completion blocks.
     def test_piped_and_dumb_outputs_remain_three_plain_lines_per_record(self):
         for output, term in ((io.StringIO(), 'xterm'), (TtyBuffer(), 'dumb')):
             with self.subTest(term=term), mock.patch.dict(os.environ, {'TERM': term}, clear=True), \
@@ -197,6 +214,7 @@ class LiveConsoleTests(unittest.TestCase):
                 self.assertEqual(len(output.getvalue().splitlines()), 6)
                 self.assertNotIn('\x1b', output.getvalue())
 
+    # Check that narrow terminals clip progress without wrapping or splitting terminal controls.
     def test_narrow_terminal_clips_live_status_without_wrapping_or_broken_color(self):
         output = TtyBuffer()
         with mock.patch.dict(os.environ, {'TERM': 'xterm'}, clear=True), \
@@ -208,6 +226,7 @@ class LiveConsoleTests(unittest.TestCase):
             self.assertTrue(line.endswith('…'))
             self.assertTrue(output.getvalue().endswith('\x1b[0m'))
 
+    # Check that disabling color leaves live progress active.
     def test_no_color_disables_styling_but_keeps_live_status(self):
         output = TtyBuffer()
         with mock.patch.dict(os.environ, {'TERM': 'xterm', 'NO_COLOR': ''}, clear=True), \
@@ -218,6 +237,7 @@ class LiveConsoleTests(unittest.TestCase):
             self.assertIn('\r\x1b[2K', output.getvalue())
             self.assertNotRegex(output.getvalue(), r'\x1b\[[0-9;]*m')
 
+    # Check that exception cleanup clears progress and preserves signal output.
     def test_exception_cleanup_erases_status_and_signal_messages_are_preserved(self):
         output = TtyBuffer()
         with mock.patch.dict(os.environ, {'TERM': 'xterm'}, clear=True), \
@@ -237,11 +257,13 @@ class LiveConsoleTests(unittest.TestCase):
             self.assertIn('[STOP] draining', lines)
             self.assertEqual(lines[-1], 'After signal')
 
+    # Check that concurrent completions retain both records and share one live status row.
     def test_concurrent_completions_keep_both_records_and_one_shared_status(self):
         output = TtyBuffer()
         stats = pipeline.Stats()
         barrier = threading.Barrier(2)
 
+        # Synchronize the workers and report a distinct recording from each.
         def complete(number):
             barrier.wait(timeout=2)
             item = dict(self.item, target_md=f'/archive/{number}.md', audio_rel=f'{number}.m4a')
@@ -257,6 +279,7 @@ class LiveConsoleTests(unittest.TestCase):
             self.assertEqual(sum('Готово' in line for line in lines), 1)
             self.assertIn('Готово 2', lines[-1])
 
+    # Check live stderr rendering on a real pseudo-terminal shared with stdout.
     def test_real_pty_stderr_does_not_overwrite_records_or_leave_duplicate_status(self):
         master, slave = pty.openpty()
         self.addCleanup(os.close, master)
@@ -265,6 +288,7 @@ class LiveConsoleTests(unittest.TestCase):
         os.set_blocking(master, False)
         output = bytearray()
 
+        # Read the available bytes from the pseudo-terminal without blocking.
         def drain():
             while select.select([master], [], [], 0.05)[0]:
                 try:

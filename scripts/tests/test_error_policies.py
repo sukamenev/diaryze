@@ -20,11 +20,13 @@ from scripts.diarizer.errors import ModelRefused, ModelsUnavailable, ModelTaskFa
 from scripts.tests.test_diarizer import REPLY, TemporaryArchive, envelope
 
 
+# Build an error envelope for a simulated provider failure.
 def failure(message):
     return envelope(message, 'ERROR')
 
 
 class ErrorClassificationTests(unittest.TestCase):
+    # Check that provider codes, error text, and exceptions map to the right policies.
     def test_provider_codes_messages_and_exceptions_have_distinct_scopes(self):
         cases = [
             ('UNAVAILABLE (code 503): No capacity', '503'),
@@ -62,18 +64,21 @@ class ErrorClassificationTests(unittest.TestCase):
             with self.subTest(error=str(error)):
                 self.assertEqual(classify_error(error), expected)
 
+    # Check that error-like words in a successful transcript do not trigger fallback.
     def test_successful_transcript_is_not_classified_as_provider_failure(self):
         text = REPLY + ' Обсудили HTTP 503 и неверный ключ API.'
         err, parsed, *_ = agy.extract_envelope_error_and_usage(*envelope(text)[:3])
         self.assertIsNone(err)
         self.assertEqual(parsed, text)
 
+    # Check that long error envelopes retain the quota reset time near the end.
     def test_envelope_classification_keeps_reset_at_end_of_long_error(self):
         payload = 'Quota reached. ' + 'detail ' * 300 + ' Resets in 2h11m10s'
         err, *_ = agy.extract_envelope_error_and_usage(*failure(payload)[:3])
         self.assertEqual(classify_error(err), 'quota')
         self.assertEqual(quota.quota_wait_seconds(err), 7890)
 
+    # Check that quota delays honor explicit retry times and configured defaults.
     def test_quota_retry_after_and_default_are_configured(self):
         self.assertEqual(quota.quota_wait_seconds('Retry-After: 60'), 80)
         self.assertEqual(quota.quota_wait_seconds('{"retry_after": 35}'), 55)
@@ -83,6 +88,7 @@ class ErrorClassificationTests(unittest.TestCase):
 
 
 class GeneralModelPolicyTests(unittest.TestCase):
+    # Reset cancellation state and create an isolated model registry.
     def setUp(self):
         runtime.STOP_EVENT.clear()
         self.addCleanup(runtime.STOP_EVENT.clear)
@@ -95,6 +101,7 @@ class GeneralModelPolicyTests(unittest.TestCase):
         self.addCleanup(output.__exit__, None, None, None)
         self.registry = models.ModelCooldowns()
 
+    # Check that timeouts pause a model at the threshold and success clears its streak.
     def test_timeout_pause_threshold_and_success_reset(self):
         self.registry.failed('a', TimeoutError('timeout'))
         self.assertEqual(self.registry.remaining('a'), 0)
@@ -106,6 +113,7 @@ class GeneralModelPolicyTests(unittest.TestCase):
         self.registry.success('a')  # Another request may already be in flight.
         self.assertEqual(self.registry.remaining('a'), 1800)
 
+    # Check that a model starts a fresh timeout streak after its cooldown expires.
     def test_timeout_counter_restarts_after_pause_without_a_success(self):
         for access in ('remaining', 'select', 'failed'):
             with self.subTest(access=access):
@@ -126,9 +134,11 @@ class GeneralModelPolicyTests(unittest.TestCase):
                 registry.failed('a', TimeoutError('timeout'))
                 self.assertEqual(registry.remaining('a'), 1800)
 
+    # Check that timeouts from different workers contribute to the same model cooldown.
     def test_two_timeouts_from_different_workers_pause_the_same_model(self):
         barrier = threading.Barrier(2)
 
+        # Report a timeout after both test workers reach the barrier.
         def fail():
             barrier.wait(timeout=2)
             self.registry.failed('a', TimeoutError('timeout'))
@@ -140,6 +150,7 @@ class GeneralModelPolicyTests(unittest.TestCase):
         self.assertEqual(self.registry.remaining('a'), 1800)
         self.assertEqual(self.registry.select(['a', 'b']), 1)
 
+    # Check that the timeout threshold and cooldown duration are configurable.
     def test_policy_threshold_and_interval_can_be_changed_in_config(self):
         with mock.patch.dict(models.MODEL_ERROR_POLICIES['timeout'], {'threshold': 3, 'cooldown_s': 9}):
             for _ in range(2):
@@ -148,6 +159,7 @@ class GeneralModelPolicyTests(unittest.TestCase):
             self.registry.failed('a', TimeoutError('timeout'))
             self.assertEqual(self.registry.remaining('a'), 9)
 
+    # Check that a provider reset controls the quota pause shared by workers.
     def test_quota_pause_uses_provider_reset_and_is_shared(self):
         self.registry.failed('a', 'QUOTA: Resets in 2h11m10s')
         self.assertEqual(self.registry.remaining('a'), 7890)
@@ -155,6 +167,7 @@ class GeneralModelPolicyTests(unittest.TestCase):
         self.now += 7890
         self.assertEqual(self.registry.select(['a', 'b']), 0)
 
+    # Check that exhaustion of permanently disabled models fails immediately.
     def test_all_fatally_disabled_models_fail_immediately_without_wait(self):
         for name in ('a', 'b'):
             self.registry.failed(name, 'Unknown model')
@@ -164,6 +177,7 @@ class GeneralModelPolicyTests(unittest.TestCase):
                 self.registry.select(['a', 'b'])
         self.assertTrue(raised.exception.all_disabled)
 
+    # Check that combining a disabled model with a content rejection exhausts only this task.
     def test_disabled_plus_content_rejection_is_local_to_task(self):
         self.registry.failed('a', 'Invalid API key')
         attempt = models.ModelAttempts(['a', 'b'], self.registry, [])
@@ -172,6 +186,7 @@ class GeneralModelPolicyTests(unittest.TestCase):
             attempt.failed(1, 'SAFETY: content safety filters')
         self.assertEqual(self.registry.select(['a', 'b']), 1)
 
+    # Check that diagnostic events distinguish a task fallback from a model pause.
     def test_policy_diagnostics_distinguish_threshold_fallback_from_pause(self):
         with tempfile.TemporaryDirectory(prefix='policy-log-test-') as tmp:
             with diagnostics.run_log(tmp) as path:
@@ -186,6 +201,7 @@ class GeneralModelPolicyTests(unittest.TestCase):
 
 
 class GeneralPipelinePolicyTests(TemporaryArchive):
+    # Prepare an isolated archive and pipeline state for policy tests.
     def setUp(self):
         super().setUp()
         runtime.STOP_EVENT.clear()
@@ -202,6 +218,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
         forget.start()
         self.addCleanup(forget.stop)
 
+    # Check that provider and access errors trigger fallback and affect later requests as configured.
     def test_server_connection_and_access_errors_use_next_model_and_skip_future_calls(self):
         for error in (failure('HTTP 500 Internal'), failure('HTTP 502 Bad Gateway'),
                       failure('HTTP 504 Gateway timeout'), ConnectionResetError('reset'),
@@ -214,6 +231,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
                 self.assertEqual([c.args[1] for c in run.call_args_list], ['first', 'second', 'second'])
                 self.assertGreater(stats.models.remaining('first'), 0)
 
+    # Check that consecutive timeouts across jobs can pause one model.
     def test_two_consecutive_timeout_exceptions_pause_model_across_jobs(self):
         with mock.patch.object(pipeline, 'run_agy', side_effect=[
             TimeoutError('timeout'), envelope(REPLY), TimeoutError('timeout'), envelope(REPLY), envelope(REPLY),
@@ -224,6 +242,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
         self.assertGreater(self.stats.models.remaining('first'), 0)
         self.assertEqual(self.stats.done, 3)
 
+    # Check that unknown provider errors stay task-local while local OS errors propagate.
     def test_unknown_provider_error_is_task_local_and_local_os_errors_propagate(self):
         with mock.patch.object(pipeline, 'run_agy', side_effect=[failure('Unexplained response'), envelope(REPLY), envelope(REPLY)]) as run:
             pipeline.process_short_batch([self.item('one.m4a')], self.args, {}, {}, self.stats)
@@ -234,6 +253,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
                 pipeline.process_short_batch([self.item('local.m4a')], self.args, {}, {}, self.stats)
         self.assertEqual(run.call_count, 1)
 
+    # Check that malformed replies get a repair attempt before model fallback.
     def test_format_error_is_repaired_then_falls_back_without_global_pause(self):
         with mock.patch.object(pipeline, 'run_agy', side_effect=[
             envelope('invalid'), envelope('still invalid'), envelope(REPLY), envelope(REPLY),
@@ -243,6 +263,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
         self.assertEqual([c.args[1] for c in run.call_args_list], ['first', 'first', 'second', 'first'])
         self.assertEqual(self.stats.models.remaining('first'), 0)
 
+    # Check that unusable responses cannot result in an empty published transcript.
     def test_format_exhaustion_without_usable_speech_does_not_publish_md(self):
         item = self.item('bad.m4a')
         with mock.patch.object(pipeline, 'run_agy', return_value=envelope('invalid')) as run:
@@ -252,6 +273,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
         self.assertFalse(Path(item['target_md']).exists())
         self.assertFalse(self.manifest.exists())
 
+    # Check that a content refusal moves to another model without triggering repair or cooldown.
     def test_plain_content_refusal_switches_without_repair_and_does_not_pause_model(self):
         with mock.patch.object(pipeline, 'run_agy', side_effect=[
             envelope('I cannot transcribe this audio.'), envelope(REPLY), envelope(REPLY),
@@ -260,6 +282,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
             pipeline.process_short_batch([self.item('two.m4a')], self.args, {}, {}, self.stats)
         self.assertEqual([c.args[1] for c in run.call_args_list], ['first', 'second', 'first'])
 
+    # Check that text in an invalid reply cannot trigger a shared provider cooldown.
     def test_format_failure_text_cannot_pause_other_workers(self):
         item = self.item('format.m4a')
         with mock.patch.object(pipeline, 'run_agy', return_value=envelope('[bad timestamp] timeout')):
@@ -269,6 +292,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
         self.assertEqual(self.stats._backend_until, 0)
         self.assertTrue(all(self.stats.models.remaining(m) == 0 for m in self.args.model_chain))
 
+    # Check that a malformed long-part reply is repaired or retried on another model.
     def test_long_format_error_uses_repairs_then_another_model(self):
         item = self.item('long.m4a')
         item['parts'] = [{'part': 1, 'path': 'one.wav', 'duration_ms': 5000, 'offset_ms': 0}]
@@ -280,6 +304,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
         self.assertEqual(self.stats.models.remaining('first'), 0)
         self.assertEqual(self.stats.done, 1)
 
+    # Check that a replacement session receives previous speakers and summary for a later part.
     def test_switching_later_long_part_restores_speakers_and_previous_summary(self):
         item = self.item('long.m4a', duration=20000)
         item['parts'] = [
@@ -299,6 +324,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
         self.assertIn('Обсудили плотность бумаги.', prompt)
         self.assertIn('[00:00:11.00]', Path(item['target_md']).read_text())
 
+    # Check that a partial batch retries just the recording that failed.
     def test_partial_batch_retries_only_failed_file(self):
         items = [self.item('good.m4a'), self.item('bad.m4a')]
         batch = '=== ITEM 1 ===\n' + REPLY + '\n=== ITEM 2 ===\ninvalid'
@@ -312,6 +338,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
         self.assertEqual(len(records), 2)
         self.assertEqual([r['model'] for r in records], ['first', 'second'])
 
+    # Check that a usable earlier response can be salvaged after other models refuse.
     def test_usable_response_can_be_salvaged_after_other_models_refuse_content(self):
         late = REPLY.replace('00:00:01.00', '00:00:08.00')
         item = self.item('late.m4a')
@@ -323,6 +350,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
         self.assertEqual(meta['model'], 'first')
         self.assertIn('Сохранено после сбоя', meta['notes'])
 
+    # Check that the explicit quota-stop option halts processing.
     def test_stop_on_quota_preserves_explicit_stop_behavior(self):
         self.args.stop_on_quota = True
         with mock.patch.object(pipeline, 'run_agy', return_value=failure('Quota reached. Resets in 1h')) as run:
@@ -330,6 +358,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
                 pipeline.process_short_batch([self.item('quota.m4a')], self.args, {}, {}, self.stats)
         self.assertEqual(run.call_count, 1)
 
+    # Check that a disabled model chain stops pipeline jobs and reaches the worker pool.
     def test_all_disabled_models_propagate_through_job_and_stop_worker_pool(self):
         item = self.item('fatal.m4a')
         item['parts'] = None
@@ -348,6 +377,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
         self.assertEqual(run.call_count, 3)
         self.assertFalse(Path(item['target_md']).exists())
 
+    # Check that CLI model exhaustion produces a nonzero exit status.
     def test_cli_reports_no_available_models_with_exit_one(self):
         with tempfile.TemporaryDirectory(prefix='fatal-cli-test-') as tmp, \
                 mock.patch('sys.argv', ['diarize.py', '--folder', tmp]), \

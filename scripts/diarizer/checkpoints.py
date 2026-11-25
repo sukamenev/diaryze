@@ -21,15 +21,18 @@ from .diagnostics import record
 CHECKPOINT_VERSION = 1
 
 
+# Locate the archive directory for resumable transcription checkpoints.
 def checkpoint_dir() -> Path:
     return Path(config.ROOT) / "work" / "checkpoints"
 
 
+# Record the part boundaries that determine checkpoint compatibility.
 def _layout(item):
     return [[p["part"], p["offset_ms"], p["duration_ms"]] for p in item["parts"]]
 
 
 class LongCheckpoint:
+    # Restore the contiguous prefix of accepted parts for a compatible recording.
     def __init__(self, item):
         self.item = item
         self.path = checkpoint_dir() / f"{item['sha256']}.json"
@@ -55,13 +58,16 @@ class LongCheckpoint:
                 break
             self.parts[number] = saved
 
+    # Retrieve a previously accepted part by number.
     def get(self, number):
         return self.parts.get(number)
 
+    # Invalidate the specified part and all later parts that depend on it.
     def drop_from(self, number):
         for key in [k for k in self.parts if k >= number]:
             del self.parts[key]
 
+    # Write the accepted part and updated checkpoint atomically.
     def save(self, number, *, speakers, lines, model, summary, warning=None):
         """Store one accepted part atomically, invalidating any later parts."""
         self.drop_from(number)
@@ -93,6 +99,7 @@ class LongCheckpoint:
                 os.unlink(tmp)
         record("checkpoint_saved", items=[self.item], part=number, model=model, path=str(self.path))
 
+    # Remove the checkpoint once the recording has been published.
     def discard(self):
         try:
             self.path.unlink()

@@ -20,6 +20,7 @@ ERROR_503 = (3, json.dumps({'status': 'ERROR', 'error': 'UNAVAILABLE (code 503):
 
 
 class ModelCooldownTests(unittest.TestCase):
+    # Prepare a model registry and controllable time source for cooldown tests.
     def setUp(self):
         runtime.STOP_EVENT.clear()
         self.addCleanup(runtime.STOP_EVENT.clear)
@@ -32,10 +33,12 @@ class ModelCooldownTests(unittest.TestCase):
         self.addCleanup(output.__exit__, None, None, None)
         self.registry = models.ModelCooldowns()
 
+    # Advance the fake clock without sleeping.
     def advance(self, seconds):
         self.now += seconds
         return False
 
+    # Check that overload pauses only the affected model until its cooldown expires.
     def test_503_pauses_only_that_model_for_300_seconds_then_primary_returns(self):
         self.registry.block('primary')
         self.assertEqual(self.registry.remaining('primary'), 300)
@@ -46,12 +49,14 @@ class ModelCooldownTests(unittest.TestCase):
         self.now += 1
         self.assertEqual(self.registry.select(['primary', 'fallback']), 0)
 
+    # Check that a second overload extends the affected model's cooldown.
     def test_repeated_503_extends_pause_from_latest_failure(self):
         self.registry.block('primary')
         self.now += 60
         self.registry.block('primary')
         self.assertEqual(self.registry.remaining('primary'), 300)
 
+    # Check that model selection waits for the earliest eligible model to recover.
     def test_all_models_wait_for_earliest_expiry_without_real_sleep(self):
         with mock.patch.dict(models.MODEL_ERROR_POLICIES['503'], {'cooldown_s': 5}):
             self.registry.block('first')
@@ -64,6 +69,7 @@ class ModelCooldownTests(unittest.TestCase):
         self.assertEqual(wait.call_count, 3)
         self.assertEqual(self.registry.remaining('second'), 2)
 
+    # Check that a single model can recover and content rejection remains task-local.
     def test_single_model_recovers_and_content_rejection_stays_local(self):
         with mock.patch.dict(models.MODEL_ERROR_POLICIES['503'], {'cooldown_s': 2}):
             self.registry.block('only')
@@ -72,19 +78,23 @@ class ModelCooldownTests(unittest.TestCase):
         self.assertEqual(self.registry.select(['a', 'b'], excluded={0}), 1)
         self.assertEqual(self.registry.select(['a', 'b']), 0)
 
+    # Check that cancellation aborts a cooldown wait without marking a recording as failed.
     def test_wait_is_cancelled_without_marking_the_audio_as_failed(self):
         self.registry.block('only')
         with mock.patch.object(runtime.STOP_EVENT, 'wait', return_value=True):
             with self.assertRaises(InterruptedError):
                 self.registry.select(['only'])
 
+    # Check that concurrent workers observe the same cooldown registry.
     def test_workers_share_one_registry(self):
         blocked = threading.Event()
 
+        # Pause the primary model and signal that the other worker can select.
         def first():
             self.registry.block('primary')
             blocked.set()
 
+        # Wait for the primary pause before selecting from the shared model chain.
         def second():
             self.assertTrue(blocked.wait(timeout=2))
             return self.registry.select(['primary', 'fallback'])
@@ -95,6 +105,7 @@ class ModelCooldownTests(unittest.TestCase):
             a.result(timeout=2)
             self.assertEqual(b.result(timeout=2), 1)
 
+    # Check that cooldown events include the reason, affected files, and recovery time.
     def test_diagnostics_include_reason_files_and_recovery_time(self):
         items = [{'audio_rel': 'Phone/test.m4a'}]
         with tempfile.TemporaryDirectory(prefix='cooldown-log-test-') as tmp:
@@ -111,6 +122,7 @@ class ModelCooldownTests(unittest.TestCase):
 
 
 class ModelPipelineTests(TemporaryArchive):
+    # Prepare the archive, shared model state, and default job options.
     def setUp(self):
         super().setUp()
         runtime.STOP_EVENT.clear()
@@ -126,6 +138,7 @@ class ModelPipelineTests(TemporaryArchive):
         forget.start()
         self.addCleanup(forget.stop)
 
+    # Check that a later job avoids the model paused by an earlier overload.
     def test_next_job_skips_model_that_returned_503_for_previous_job(self):
         with mock.patch.object(pipeline, 'run_agy', side_effect=[ERROR_503, envelope(REPLY), envelope(REPLY)]) as run:
             pipeline.process_short_batch([self.item('one.m4a')], self.args, {}, {}, self.stats)
@@ -134,6 +147,7 @@ class ModelPipelineTests(TemporaryArchive):
         self.assertEqual(self.stats.done, 2)
         self.assertEqual(self.stats.errors, 0)
 
+    # Check that a long recording restarts its session after the active model is paused elsewhere.
     def test_long_recording_switches_session_when_another_worker_pauses_its_model(self):
         item = self.item('long.m4a', duration=20000)
         item['parts'] = [
@@ -141,6 +155,7 @@ class ModelPipelineTests(TemporaryArchive):
             {'part': 2, 'path': 'part2.wav', 'duration_ms': 10000, 'offset_ms': 10000},
         ]
 
+        # Pause the first model while returning a valid part to simulate another worker's failure.
         def reply(*args, **kwargs):
             if args[1] == 'first':
                 self.stats.models.block('first')  # Another in-flight request failed.
@@ -152,6 +167,7 @@ class ModelPipelineTests(TemporaryArchive):
         self.assertIsNone(run.call_args_list[1].kwargs['conversation_id'])
         self.assertEqual(self.stats.done, 1)
 
+    # Check that overload during a repair affects model selection for subsequent jobs.
     def test_repair_503_also_pauses_model_for_subsequent_jobs(self):
         late = REPLY.replace('00:00:01.00', '00:00:08.00')
         with mock.patch.object(pipeline, 'run_agy', side_effect=[envelope(late), ERROR_503, envelope(REPLY), envelope(REPLY)]) as run:
@@ -160,9 +176,11 @@ class ModelPipelineTests(TemporaryArchive):
         self.assertEqual([c.args[1] for c in run.call_args_list], ['first', 'first', 'second', 'second'])
         self.assertEqual(self.stats.done, 2)
 
+    # Check that the repair path avoids a model already paused by another worker.
     def test_repair_does_not_call_a_model_paused_by_another_worker(self):
         late = REPLY.replace('00:00:01.00', '00:00:08.00')
 
+        # Pause the first model while returning a reply that would normally require repair.
         def reply(*args, **kwargs):
             if args[1] == 'first':
                 self.stats.models.block('first')
@@ -174,9 +192,11 @@ class ModelPipelineTests(TemporaryArchive):
         self.assertEqual([c.args[1] for c in run.call_args_list], ['first', 'second'])
         self.assertEqual(self.stats.done, 1)
 
+    # Check recovery from shared model pauses while respecting task-local rejections.
     def test_all_paused_models_recover_without_retrying_content_rejection(self):
         clock = [100.0]
 
+        # Advance simulated time until an eligible model becomes available.
         def advance(seconds):
             clock[0] += seconds
             return False
@@ -193,9 +213,11 @@ class ModelPipelineTests(TemporaryArchive):
         self.assertEqual(self.stats.done, 1)
         self.assertEqual(self.stats.errors, 0)
 
+    # Check that refusal diagnostics list only the models that received the task.
     def test_refusal_reports_models_actually_tried_when_primary_was_initially_paused(self):
         clock = [100.0]
 
+        # Advance simulated time through the primary model's initial cooldown.
         def advance(seconds):
             clock[0] += seconds
             return False

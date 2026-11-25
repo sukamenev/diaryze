@@ -17,6 +17,7 @@ else:
     from diarizer.identification import split_markdown
 
 
+# Exchange two speaker keys throughout the transcript, keeping metadata coherent.
 def swap_speakers(raw, first, second):
     if first == second or {first, second} & {"", "?", "unknown"}:
         raise ValueError("Choose two distinct speaker labels")
@@ -51,6 +52,7 @@ def swap_speakers(raw, first, second):
     return b"".join(lines), counts
 
 
+# Write the corrected Markdown atomically and preserve file metadata.
 def replace_markdown(path, before, raw, changed):
     temp = None
     try:
@@ -74,6 +76,7 @@ def replace_markdown(path, before, raw, changed):
             temp.unlink(missing_ok=True)
 
 
+# Preview or apply a speaker swap for a selected Markdown file.
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("markdown", type=Path, help="path to one transcript")

@@ -20,6 +20,7 @@ from scripts.diarizer.processes import run_capture
 ROOT = Path(__file__).resolve().parents[2]
 
 
+# Check whether a process is still alive using the platform's available process metadata.
 def running(pid):
     if sys.platform == "darwin":
         status = subprocess.run(["ps", "-o", "state=", "-p", str(pid)], capture_output=True, text=True)
@@ -31,6 +32,7 @@ def running(pid):
         return False
 
 
+# Stop a leftover test process using the PID saved in its marker file.
 def kill_marker(path):
     if path.exists():
         pid = int(path.read_text())
@@ -42,6 +44,7 @@ def kill_marker(path):
 
 
 class ProcessTests(unittest.TestCase):
+    # Check that workers cannot read terminal input or acquire a controlling terminal.
     def test_no_terminal_input_or_controlling_tty(self):
         code = '''
 import json, os, sys
@@ -59,6 +62,7 @@ print(json.dumps([sys.stdin.read(), os.isatty(0), os.isatty(1), os.isatty(2), co
         result = run_capture([sys.executable, "-c", code], input="prompt", timeout=5)
         self.assertEqual(json.loads(result.stdout)[0], "prompt")
 
+    # Check that a complete JSON envelope survives hang-guard cleanup.
     def test_complete_envelope_survives_hang_guard_kill(self):
         code = '''
 import json, signal, time
@@ -75,6 +79,7 @@ time.sleep(30)
         self.assertIsNone(error)
         self.assertEqual((text, conv), ("READY", "hang-test"))
 
+    # Check that a timeout stops a detached descendant as well as its parent.
     def test_timeout_kills_detached_descendant(self):
         with tempfile.TemporaryDirectory(prefix="diarizer-process-test-") as tmp:
             marker = Path(tmp) / "child.pid"
@@ -93,6 +98,7 @@ time.sleep(60)
             self.assertTrue(marker.exists())
             self.assertFalse(running(int(marker.read_text())))
 
+    # Check that the signal handler can run while the console lock is held.
     def test_signal_handler_does_not_acquire_console_lock(self):
         code = '''
 import signal
@@ -109,6 +115,7 @@ print('DONE')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("DONE", result.stdout)
 
+    # Check that a second interrupt cleans up descendants and restores terminal settings.
     def test_double_ctrl_c_cleans_children_and_restores_terminal(self):
         with tempfile.TemporaryDirectory(prefix="diarizer-pty-test-") as tmp:
             marker = Path(tmp) / "child.pid"
@@ -164,6 +171,7 @@ print('RESTORED', flush=True)
                                     stdout=slave, stderr=slave, start_new_session=True)
             output = bytearray()
 
+            # Read pseudo-terminal output until the expected marker arrives or the deadline expires.
             def read_until(token, timeout=5):
                 deadline = time.monotonic() + timeout
                 while token not in output and time.monotonic() < deadline:

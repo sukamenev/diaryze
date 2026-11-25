@@ -25,6 +25,7 @@ from .prompt_files import load_prompt
 AGY_HOME_LOCK = threading.Lock()
 
 
+# Prepare a separate agent home with shared credentials and the optional reader profile.
 def ensure_agy_home(use_custom_agent: bool) -> str | None:
     """Create isolated temp HOME for agy to keep /resume clean and load minimal agent."""
     # Do not require antigravity-oauth-token: macOS signs in through Keychain,
@@ -57,6 +58,7 @@ def ensure_agy_home(use_custom_agent: bool) -> str | None:
         return home
 
 
+# Remove local artifacts belonging to a completed agent conversation.
 def agy_forget(home: str | None, conv_id: str | None):
     if not home or not conv_id or not re.fullmatch(r"[\w-]+", conv_id):
         return
@@ -72,6 +74,7 @@ def agy_forget(home: str | None, conv_id: str | None):
                     pass
 
 
+# Check whether stdout contains a complete agent response envelope.
 def agy_envelope_complete(text: str) -> bool:
     try:
         env = json.loads(text)
@@ -80,6 +83,7 @@ def agy_envelope_complete(text: str) -> bool:
     return isinstance(env, dict) and "status" in env
 
 
+# Send a prompt to the agent with a timeout and optional conversation continuity.
 def run_agy(prompt: str, model: str, timeout: int, use_custom_agent: bool, conversation_id: str | None = None):
     """Run `agy -p` with JSON envelope handling and hang protection."""
     home = ensure_agy_home(use_custom_agent)
@@ -108,6 +112,7 @@ def run_agy(prompt: str, model: str, timeout: int, use_custom_agent: bool, conve
 
 
 
+# Separate transcript text, usage, and session ID from provider errors.
 def extract_envelope_error_and_usage(rc: int, stdout: str, stderr: str):
     env = None
     try:

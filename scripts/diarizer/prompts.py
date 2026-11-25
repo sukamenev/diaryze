@@ -10,6 +10,7 @@ from .owners import find_folder_owner, owner_label
 from .transcript import format_ts
 
 
+# Normalize contact numbers for matching prompt references.
 def _phone_forms(phone: str) -> set[str]:
     digits = re.sub(r"\D+", "", str(phone or ""))
     if not digits:
@@ -20,6 +21,7 @@ def _phone_forms(phone: str) -> set[str]:
     return forms
 
 
+# Collect searchable name, alias, and nickname tokens from a catalog card.
 def _entry_tokens(info: dict) -> set[str]:
     texts = (
         [info.get("name") or ""]
@@ -34,6 +36,7 @@ def _entry_tokens(info: dict) -> set[str]:
     return tokens
 
 
+# Check whether a catalog card is relevant to a recording.
 def _matches_item(info: dict, item_phones: set[str], item_contacts: set[str], item_tokens: set[str]) -> bool:
     if not isinstance(info, dict):
         return False
@@ -51,6 +54,7 @@ def _matches_item(info: dict, item_phones: set[str], item_contacts: set[str], it
     return bool(item_tokens and (_entry_tokens(info) & item_tokens))
 
 
+# Select detailed cards and compact references for the prompt.
 def _select_refs(people: dict, orgs: dict, items: list[dict] | None) -> dict:
     people_path, orgs_path = catalog_paths()
     if not items or (len(people) + len(orgs)) <= 25:
@@ -108,10 +112,12 @@ def _select_refs(people: dict, orgs: dict, items: list[dict] | None) -> dict:
     return payload
 
 
+# Render the selected people and organization references.
 def format_refs_for_prompt(people: dict, orgs: dict, items: list[dict] | None = None) -> str:
     return json.dumps(_select_refs(people, orgs, items), ensure_ascii=False, indent=2)
 
 
+# Describe the recording type, phone owner, and any direction evidence.
 def owner_hint(audio_rel: str, root: str | None = None, *, people=None, direction=None) -> str:
     meta, owner_rel = find_folder_owner(audio_rel, root=root)
     if meta:
@@ -134,6 +140,7 @@ def owner_hint(audio_rel: str, root: str | None = None, *, people=None, directio
     return load_prompt("owner-other.md")
 
 
+# Build the instructions and recording descriptors for short audio files.
 def build_batch_prompt(items: list[dict], people: dict, orgs: dict) -> str:
     descriptions = []
     for index, item in enumerate(items, 1):
@@ -152,6 +159,7 @@ def build_batch_prompt(items: list[dict], people: dict, orgs: dict) -> str:
                        items='\n\n'.join(descriptions))
 
 
+# Build a segment prompt with the context needed for its session.
 def build_part_prompt(item: dict, part: dict, people: dict, orgs: dict, is_first: bool,
                       *, fresh_session=False, speaker_context=None) -> str:
     common = {'rules': load_prompt('rules.md'), 'path': part['path'],

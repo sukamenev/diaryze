@@ -6,6 +6,7 @@ from string import Template
 from .config import PROMPTS_DIR
 
 
+# Read a bundled prompt template and substitute any supplied values.
 def load_prompt(name, **values):
     text = (Path(PROMPTS_DIR) / name).read_text(encoding='utf-8')
     return Template(text).substitute(values).strip()

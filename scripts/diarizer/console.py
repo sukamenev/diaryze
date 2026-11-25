@@ -17,11 +17,13 @@ _LIVE = None
 _SGR = re.compile(r"\x1b\[[0-9;]*m")
 
 
+# Determine whether the stream supports terminal presentation.
 def _interactive(stream):
     return (getattr(stream, "isatty", lambda: False)()
             and os.environ.get("TERM") != "dumb" and not STOP_EVENT.is_set())
 
 
+# Read the current terminal width for progress rendering.
 def _columns(stream):
     try:
         return max(1, os.get_terminal_size(stream.fileno()).columns)
@@ -29,10 +31,12 @@ def _columns(stream):
         return max(1, shutil.get_terminal_size().columns)
 
 
+# Compute how much terminal space a character occupies.
 def _cell_width(char):
     return 0 if unicodedata.combining(char) else (2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1)
 
 
+# Clip progress text to a single physical terminal row.
 def _fit_progress(text, width):
     """Keep the live status on one physical row, leaving the last column free."""
     limit = max(0, width - 1)
@@ -54,6 +58,7 @@ def _fit_progress(text, width):
     return "".join(parts) + "…" + ("\x1b[0m" if "\x1b" in text else ""), used + 1
 
 
+# Check whether two output streams share a terminal.
 def _same_terminal(first, second):
     if first is second:
         return True
@@ -64,6 +69,7 @@ def _same_terminal(first, second):
         return False
 
 
+# Clear the active progress row before writing other output.
 def _erase_progress():
     """Called under PRINT_LOCK; leave the cursor at the start of the cleared row."""
     global _LIVE
@@ -82,6 +88,7 @@ def _erase_progress():
     stream.flush()
 
 
+# Display the pending progress line when the terminal can show it.
 def _draw_progress(stream, text):
     global _LIVE
     fitted, cells = _fit_progress(text, _columns(stream))
@@ -90,6 +97,7 @@ def _draw_progress(stream, text):
     _LIVE = stream, text, cells
 
 
+# Set up and clean up the shared transient progress display.
 @contextmanager
 def progress_output():
     """Own the transient status for one CLI run, including exceptional exits."""
@@ -102,12 +110,14 @@ def progress_output():
             _erase_progress()
 
 
+# Make untrusted text safe to print to a terminal.
 def _display(value):
     # File names and model text must not inject terminal commands or extra lines.
     return "".join(f"\\x{ord(c):02x}" if ord(c) < 32 or ord(c) == 127 else c for c in str(value))
 
 
 class Palette:
+    # Choose styling behavior for the output stream.
     def __init__(self, stream=None, enabled=None):
         stream = stream if stream is not None else sys.stdout
         self.enabled = enabled if enabled is not None else (
@@ -115,14 +125,17 @@ class Palette:
             and os.environ.get("TERM") != "dumb" and "NO_COLOR" not in os.environ
         )
 
+    # Apply a terminal style when color is enabled.
     def paint(self, value, code):
         text = _display(value)
         return f"\x1b[{code}m{text}\x1b[0m" if self.enabled else text
 
+    # Render text in the subdued status style.
     def dim(self, value):
         return self.paint(value, "2")
 
 
+# Write a message atomically relative to progress and other workers.
 def emit(message, *, file=None, flush=True, final=False):
     """Write an entire message/block under the shared worker output lock."""
     stream = file if file is not None else sys.stdout
@@ -143,10 +156,12 @@ def emit(message, *, file=None, flush=True, final=False):
             _draw_progress(live[0], live[1])
 
 
+# Format a recording's duration for the completion display.
 def _duration(ms):
     return f"{ms / 1000:.0f} с" if ms < 60000 else f"{ms / 60000:.1f} мин"
 
 
+# Format elapsed time for progress and run totals.
 def format_time(seconds):
     hours, remainder = divmod(max(0, int(seconds)), 3600)
     minutes, seconds = divmod(remainder, 60)
@@ -157,7 +172,9 @@ def format_time(seconds):
     return f"{seconds} с"
 
 
+# Build the compact status line for work in progress.
 def render_progress(stats, palette, *, clock=False):
+    # Render a single progress field with optional emphasis.
     def field(label, value):
         return palette.dim(label) + " " + _display(value)
 
@@ -181,6 +198,7 @@ def render_progress(stats, palette, *, clock=False):
     return " · ".join(parts)
 
 
+# Build the completion block for a saved transcript.
 def render_completed(item, meta, stats, *, color=None, now=None):
     palette = Palette(enabled=color)
     now = now if now is not None else datetime.now(TZ)
@@ -204,6 +222,7 @@ def render_completed(item, meta, stats, *, color=None, now=None):
     return header + "\n  " + " · ".join(details) + "\n  " + render_progress(stats, palette)
 
 
+# Emit the completion block and refresh live progress.
 def completed(item, meta, stats):
     stream = sys.stdout
     if not _interactive(stream):
@@ -216,6 +235,7 @@ def completed(item, meta, stats):
         _draw_progress(stream, progress)
 
 
+# Build the final run summary from the worker statistics.
 def render_finished(stats, *, stopped=False, color=None):
     palette = Palette(enabled=color)
     status = palette.paint("Остановлено" if stopped else "Завершено", "1;33" if stopped else "1;32")

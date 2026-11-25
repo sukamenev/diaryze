@@ -9,6 +9,7 @@ from .config import TRANSCRIPT_SCHEMA_VERSION
 from .identification import split_markdown, status_from_markdown
 
 
+# Validate and normalize the optional short summary.
 def valid_summary(value):
     if value is None:
         return None
@@ -20,6 +21,7 @@ def valid_summary(value):
     return value
 
 
+# Validate the optional numeric spam score.
 def valid_spam_score(value):
     if value is None:
         return None
@@ -28,6 +30,7 @@ def valid_spam_score(value):
     return value
 
 
+# Convert milliseconds to the archive's fixed-precision seconds format.
 def duration_seconds(milliseconds):
     if type(milliseconds) is not int or milliseconds <= 0:
         raise ValueError('duration_ms must be a positive integer')
@@ -37,12 +40,14 @@ def duration_seconds(milliseconds):
     return value
 
 
+# Read a legacy summary from the transcript body.
 def body_summary(body):
     match = re.search(r'^##[ \t]+(?:Кратко|Краткое содержание|Summary)[ \t]*\r?\n'
                       r'([\s\S]*?)(?=^#{1,2}[ \t]+|\Z)', body, re.M | re.I)
     return ' '.join(match[1].split()) if match else None
 
 
+# Extract and validate the summary supplied by the model.
 def response_summary(raw):
     values = [line.strip().split(':', 1)[1].strip() for line in raw.splitlines()
               if line.strip().startswith('SUMMARY_JSON:')]
@@ -53,6 +58,7 @@ def response_summary(raw):
     return True, valid_summary(json.loads(values[0]))
 
 
+# Add missing root metadata while preserving existing YAML and transcript text.
 def patch_catalog_fields(raw, people, orgs, *, summaries=None):
     """Preserve the body and existing YAML verbatim; add only root fields/version."""
     lines, end, meta = split_markdown(raw)

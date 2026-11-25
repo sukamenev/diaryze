@@ -23,6 +23,7 @@ else:
     from diarizer.identification import patch_markdown, split_markdown
 
 
+# Apply a Markdown transformation across eligible archive transcripts.
 def migrate(root, *, folder=None, apply=False, patcher=None, journal_prefix="identification",
             patcher_with_path=False):
     root = Path(root).resolve()
@@ -48,6 +49,7 @@ def migrate(root, *, folder=None, apply=False, patcher=None, journal_prefix="ide
     result = {"files": 0, "updated": 0, "unchanged": 0, "failed": [], "manifest_updated": 0}
     journal = None
 
+    # Append updated metadata for changed transcripts whose audio hash still matches.
     def update_manifest(audio, meta, status):
         previous = state.get(audio)
         if not previous or previous.get("status") != "done" or previous.get("sha256") != meta.get("sha256"):
@@ -128,6 +130,7 @@ def migrate(root, *, folder=None, apply=False, patcher=None, journal_prefix="ide
     return result
 
 
+# Run the identification migration in preview or apply mode.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--folder", help="Folder inside Text (default: all Text)")

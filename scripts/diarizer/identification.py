@@ -17,6 +17,7 @@ STATUS_LABELS = {
 }
 
 
+# Check whether a speaker has an accepted catalog link and source.
 def confirmed_identity(info, people, orgs):
     if not isinstance(info, dict):
         return False
@@ -30,6 +31,7 @@ def confirmed_identity(info, people, orgs):
     return info.get("role") == "robot" and isinstance(info.get("org"), str) and info["org"] in orgs
 
 
+# Compute how many declared or used speaker keys are identified.
 def identification_status(speakers, people, orgs, *, used_speakers=(), no_speech=False):
     speakers = speakers if isinstance(speakers, dict) else {}
     used_speakers = set(used_speakers)
@@ -54,6 +56,7 @@ def identification_status(speakers, people, orgs, *, used_speakers=(), no_speech
     return "unresolved"
 
 
+# Separate YAML front matter from the transcript while retaining the original lines.
 def split_markdown(raw):
     lines = raw.splitlines(keepends=True)
     if not lines or lines[0].strip() != b"---":
@@ -67,6 +70,7 @@ def split_markdown(raw):
     return lines, end, meta
 
 
+# Recalculate identification using the stored speakers and utterance keys.
 def status_from_markdown(raw, people, orgs):
     lines, end, meta = split_markdown(raw)
     body = b"".join(lines[end + 1:]).decode("utf-8")
@@ -80,6 +84,7 @@ def status_from_markdown(raw, people, orgs):
                                  used_speakers=used, no_speech=no_speech)
 
 
+# Update the root schema and status fields while preserving other content.
 def patch_markdown(raw, people, orgs):
     """Change only root schema/status lines; preserve every other byte."""
     lines, end, meta = split_markdown(raw)

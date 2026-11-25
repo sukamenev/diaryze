@@ -18,6 +18,7 @@ PRINT_LOCK = threading.Lock()
 CONSOLE_INTERRUPTED = threading.Event()
 
 
+# Install signal handlers for orderly draining and immediate cancellation.
 @contextmanager
 def stop_signals():
     """First Ctrl+C drains active work; second, TERM or HUP cancels it."""
@@ -25,6 +26,7 @@ def stop_signals():
     FORCE_STOP_EVENT.clear()
     CONSOLE_INTERRUPTED.clear()
 
+    # Escalate a repeated interrupt or termination signal to a forced stop.
     def handle_stop(signum, frame):
         if signum != signal.SIGINT or STOP_EVENT.is_set():
             if FORCE_STOP_EVENT.is_set():

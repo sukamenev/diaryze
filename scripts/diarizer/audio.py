@@ -15,6 +15,7 @@ from .archive import sha256_file
 from .processes import run_capture
 
 
+# Read the duration of a source that contains an audio stream.
 def probe_duration_ms(path: str):
     p = run_capture(
         ["ffprobe", "-v", "error", "-select_streams", "a:0",
@@ -41,11 +42,13 @@ def probe_duration_ms(path: str):
     return None, "no_positive_audio_duration"
 
 
+# Find the optional container-repair tool on the executable path.
 def find_untrunc() -> str | None:
     """Locate `untrunc` binary in PATH for moov-less MP4/3GP/M4A recovery."""
     return shutil.which("untrunc")
 
 
+# Return the diagnostic from a strict full-stream audio decode.
 def decode_audio_error(path: str) -> str | None:
     """Decode the whole stream strictly; a readable container alone is insufficient."""
     p = run_capture(
@@ -58,6 +61,7 @@ def decode_audio_error(path: str) -> str | None:
     return None
 
 
+# Find nearby readable media suitable as a recovery reference.
 def _find_reference_audio(fp: str, limit: int = 2) -> list[str]:
     """Pick nearby valid .m4a/.mp4 reference files in the same directory."""
     parent = os.path.dirname(fp)
@@ -93,6 +97,7 @@ def _find_reference_audio(fp: str, limit: int = 2) -> list[str]:
     return refs
 
 
+# Try to rebuild the damaged container using a nearby reference recording.
 def untrunc_recover(fp: str, tmp_dir: str, untrunc_bin: str | None) -> tuple[str | None, int | None]:
     """Attempt non-destructive recovery of moov-less m4a/3gp container into tmp_dir."""
     if not untrunc_bin:
@@ -161,6 +166,7 @@ _FAAD_LOCK = threading.Lock()
 _FAAD_LIB = [None, False]  # [lib_or_none, attempted]
 
 
+# List possible FAAD2 library locations for the current platform.
 def _faad_library_names():
     if sys.platform != "darwin":
         yield from ("libfaad.so.2", "libfaad.so")
@@ -185,6 +191,7 @@ def _faad_library_names():
     yield from names
 
 
+# Load and cache the FAAD2 decoder with its native function signatures.
 def _get_libfaad():
     """Lazily load the FAAD2 shared library with ctypes signatures."""
     if _FAAD_LIB[1]:
@@ -221,6 +228,7 @@ def _get_libfaad():
         return _FAAD_LIB[0]
 
 
+# Decode the variable-length size in an MP4 descriptor.
 def _read_mp4_descr_len(buf: bytes, pos: int) -> tuple[int, int]:
     length = 0
     for _ in range(4):
@@ -234,6 +242,7 @@ def _read_mp4_descr_len(buf: bytes, pos: int) -> tuple[int, int]:
     return length, pos
 
 
+# Read the AAC decoder configuration from a reference file or use defaults.
 def _extract_aac_asc(ref_path: str) -> bytes:
     """Read AudioSpecificConfig from reference MP4/M4A `esds` box; fallback to 44.1kHz mono LC."""
     default_asc = b"\x12\x08"
@@ -259,6 +268,7 @@ def _extract_aac_asc(ref_path: str) -> bytes:
     return default_asc
 
 
+# Recover playable AAC from raw frames in an interrupted recording.
 def faad_recover_aac(fp: str, tmp_dir: str) -> tuple[str | None, int | None]:
     """Losslessly recover raw AAC frames from a moov-less MP4/3GP/M4A into tmp_dir via libfaad2."""
     lib = _get_libfaad()
@@ -351,6 +361,7 @@ def faad_recover_aac(fp: str, tmp_dir: str) -> tuple[str | None, int | None]:
     return out_m4a, ms
 
 
+# Prepare verified audio for recognition, repairing and splitting it when needed.
 def prepare_audio_work(
     cand: dict,
     tmp_dir: str,

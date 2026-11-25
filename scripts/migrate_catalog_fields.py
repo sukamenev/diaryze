@@ -18,6 +18,7 @@ else:
     from diarizer.identification import split_markdown
 
 
+# Run the catalog-field migration in preview or apply mode.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--folder', help='Folder inside Text (default: all Text)')
@@ -26,6 +27,7 @@ def main():
     args = parser.parse_args()
     summaries = json.loads(Path(args.summaries).read_text()) if args.summaries else {}
     counts = Counter()
+    # Calculate the catalog-field update and count populated fields.
     def patch(raw, people, orgs):
         changed, status = patch_catalog_fields(raw, people, orgs, summaries=summaries)
         _, _, meta = split_markdown(changed)

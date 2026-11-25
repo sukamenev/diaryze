@@ -27,6 +27,7 @@ from .diagnostics import record, run_log
 from .errors import ModelsUnavailable
 
 
+# Parse CLI options, select the archive, and initialize processing.
 def main():
     ap = argparse.ArgumentParser(description="Parallel agy audio diarizer")
     ap.add_argument("--root", help="Archive root, useful with --folder to limit the scan")
@@ -106,6 +107,7 @@ def main():
         return _run(args)
 
 
+# Run the worker pool with signal handling, terminal cleanup, and diagnostics.
 def _run(args):
     with stop_signals(), preserve_terminal(), progress_output():
         if args.dry_run:
@@ -125,6 +127,7 @@ def _run(args):
                 raise
 
 
+# Scan the pending queue, coordinate workers, and report final totals.
 def run_workers(args):
     cands = scan_pending(args.subdir, retry_skipped=args.retry_skipped, retry_refused=args.retry_refused,
                          retry_recovery=getattr(args, "retry_recovery", False))
@@ -157,9 +160,11 @@ def run_workers(args):
 
     q_lock = threading.Lock()
 
+    # Track retry attempts against a particular version of a source file.
     def file_key(item):
         return item['audio_rel'], item.get('mtime'), os.path.getsize(item['audio_abs'])
 
+    # Claim each job under the queue lock and release its files when finished.
     def work():
         while not STOP_EVENT.is_set():
             with q_lock:
@@ -187,6 +192,7 @@ def run_workers(args):
                     for it in job:
                         active_rels.discard(it["audio_rel"])
 
+    # Handle cancellation and stop the pool if a worker fails unexpectedly.
     def worker_loop():
         try:
             work()

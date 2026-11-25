@@ -20,6 +20,7 @@ else:
     from migrate_identification import migrate
 
 
+# Add a missing silent owner and recalculate status with minimal YAML edits.
 def patch_phone_owners(raw, people, orgs, *, root=ROOT, audio_rel=None):
     """Insert just the owner mapping and update status, preserving existing MD text."""
     lines, end, meta = split_markdown(raw)
@@ -51,6 +52,7 @@ def patch_phone_owners(raw, people, orgs, *, root=ROOT, audio_rel=None):
     return changed, status
 
 
+# Run the silent phone owner migration in preview or apply mode.
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--folder", help="Optional folder inside Text/")

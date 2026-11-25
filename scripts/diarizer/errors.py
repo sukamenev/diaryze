@@ -8,6 +8,7 @@ from .config import QUOTA_ERR_PAT, SAFETY_ERR_PAT, UNAVAILABLE_503_PAT
 
 
 class ModelRefused(RuntimeError):
+    # Keep the refusal message and the models that actually tried the task.
     def __init__(self, reason, models_tried=None):
         super().__init__(reason)
         self.reason = reason
@@ -23,6 +24,7 @@ class MediaInputError(RuntimeError):
 
 
 class ModelsUnavailable(RuntimeError):
+    # Record whether model exhaustion affects the entire run.
     def __init__(self, message, *, all_disabled=False):
         super().__init__(message)
         self.all_disabled = all_disabled
@@ -63,6 +65,7 @@ _HTTP_CODE = re.compile(
     r"(401|403|404|429|500|502|503|504)\b", re.I)
 
 
+# Map provider failures to the categories used by retry policies.
 def classify_error(error):
     if isinstance(error, (TimeoutError, subprocess.TimeoutExpired)):
         return "timeout"
@@ -101,6 +104,7 @@ def classify_error(error):
     return "unknown"
 
 
+# Turn provider output and process status into a consistent error message.
 def normalize_error(error, rc=None):
     kind = classify_error(error)
     prefix = next((p for p, k in PREFIXES.items() if k == kind), "ERR")

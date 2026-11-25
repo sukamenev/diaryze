@@ -50,6 +50,7 @@ NAME_SYNONYMS = {
 }
 
 
+# Build equivalent phone-number forms for contact matching.
 def _phone_forms(raw: str) -> set[str]:
     digits = re.sub(r"\D+", "", str(raw or ""))
     if not digits:
@@ -60,6 +61,7 @@ def _phone_forms(raw: str) -> set[str]:
     return forms
 
 
+# Normalize contact labels into tokens used to compare speaker names.
 def _tokens(text: str) -> set[str]:
     base = {w for w in re.findall(r"[а-яёa-z0-9]+", str(text or "").lower()) if len(w) >= 3}
     expanded = set(base)
@@ -68,6 +70,7 @@ def _tokens(text: str) -> set[str]:
     return expanded
 
 
+# Find the best catalog card for the transcript's contact and phone metadata.
 def _find_person_match(meta: dict, people: dict) -> tuple[str, dict] | None:
     phones = set()
     for p in meta.get("phones") or []:
@@ -103,6 +106,7 @@ def _find_person_match(meta: dict, people: dict) -> tuple[str, dict] | None:
     return None
 
 
+# Check whether a speaker label is compatible with the selected person.
 def _speaker_matches_entry(sp_key: str, info: dict, pinfo: dict, contact: str) -> bool:
     if info.get("temp") or info.get("role") in {"robot", "operator", "owner"}:
         return False
@@ -131,6 +135,7 @@ def _speaker_matches_entry(sp_key: str, info: dict, pinfo: dict, contact: str) -
     return bool(sp_toks and (sp_toks & entry_toks))
 
 
+# Link eligible speakers to catalog cards and update the transcript status.
 def relink_markdown_speakers(raw: bytes, people: dict, orgs: dict) -> tuple[bytes, str]:
     lines, end, meta = split_markdown(raw)
     if str(meta.get("schema_version")) not in {"1.0", "2.0"}:
@@ -200,6 +205,7 @@ def relink_markdown_speakers(raw: bytes, people: dict, orgs: dict) -> tuple[byte
     return rendered.encode("utf-8"), new_status
 
 
+# Scan the archive for speaker links to preview or update.
 def main():
     ap = argparse.ArgumentParser(description="Relink person: null speakers in Text/ MD files to people.yaml entries.")
     ap.add_argument("--folder", help="Optional subfolder under Text/")

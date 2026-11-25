@@ -8,6 +8,7 @@ from scripts.find import meaningful_speech_stats, search_transcripts
 
 
 class FindTranscriptsTests(unittest.TestCase):
+    # Check that word counts exclude transcript markup and non-speech annotations.
     def test_meaningful_word_count_ignores_markers_timestamps_and_notes(self):
         body = """## Речь
 
@@ -24,6 +25,7 @@ class FindTranscriptsTests(unittest.TestCase):
         empty_body = "## Речь\n\n[без речи]\n"
         self.assertEqual(meaningful_speech_stats(empty_body), (0, 0, True))
 
+    # Check that search applies duration, speech, spam, participant, and date filters.
     def test_filters_by_duration_words_spam_bot_person_and_date(self):
         with tempfile.TemporaryDirectory(prefix="find-md-test-") as tmp:
             root = Path(tmp)

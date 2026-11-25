@@ -17,6 +17,7 @@ _LOG = None
 _RUN_ID = None
 
 
+# Open the run's diagnostic log and release it on exit.
 @contextmanager
 def run_log(directory=None):
     global _LOG, _RUN_ID
@@ -35,6 +36,7 @@ def run_log(directory=None):
                 _LOG, _RUN_ID = previous
 
 
+# Append a structured diagnostic event with recording and error context.
 def record(event, *, items=(), error=None, **details):
     with _LOCK:
         if _LOG is None:

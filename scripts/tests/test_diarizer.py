@@ -18,6 +18,7 @@ from scripts.diarizer import (agy, archive, audio, checkpoints, cli, config, con
                               processes, prompts, quota, runtime)
 
 
+# Wrap a fake provider response in the CLI's expected JSON envelope.
 def envelope(text, status="SUCCESS", conversation="test-conversation"):
     return (
         0 if status == "SUCCESS" else 1,
@@ -31,6 +32,7 @@ REPLY = 'SPEAKERS_JSON: {"Собеседник": {"person": null, "note": "Не 
 
 
 class TemporaryArchive(unittest.TestCase):
+    # Create an isolated archive and reset runtime state for each test.
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(prefix="diarizer-test-")
         self.addCleanup(tmp.cleanup)
@@ -40,6 +42,7 @@ class TemporaryArchive(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
+    # Create a recording fixture and return its pipeline metadata.
     def item(self, name="test.m4a", duration=5000):
         source = self.root / "Phone/2026" / name
         source.parent.mkdir(parents=True, exist_ok=True)
@@ -53,6 +56,7 @@ class TemporaryArchive(unittest.TestCase):
 
 
 class ArchiveTests(TemporaryArchive):
+    # Check that archive scans exclude transcript output, service folders, and nonaudio files.
     def test_whole_archive_scan_excludes_text_services_and_nonaudio(self):
         wanted = {"Phone/2019/call.wav", "Phone/2025/call.m4a", "Recordings/mono.mp3",
                   "Smartphone/voice.opus", "root.amr", "Phone/.контакт.m4a", "Phone/raw"}
@@ -73,6 +77,7 @@ class ArchiveTests(TemporaryArchive):
         scoped = archive.scan_pending(str(self.root / "Recordings"))
         self.assertEqual({x["audio_rel"] for x in scoped}, {"Recordings/mono.mp3", "Recordings/sound.blob"})
 
+    # Check that an explicit source folder cannot escape the archive or name a service path.
     def test_source_folder_rejects_service_directories_and_escape(self):
         for name in ("Text", "docs", "scripts"):
             (self.root / name).mkdir()
@@ -82,6 +87,7 @@ class ArchiveTests(TemporaryArchive):
             with self.subTest(folder=path), self.assertRaises(ValueError):
                 archive.resolve_source_dir(path)
 
+    # Check recognition of recorder and WhatsApp dates and unknown call direction.
     def test_dates_from_miui_recorders_whatsapp_and_unknown_direction(self):
         cases = {
             "70000000106_190627_134712.m4a": "2019-06-27T13:47:12",
@@ -102,6 +108,7 @@ class ArchiveTests(TemporaryArchive):
         self.assertEqual(vrf[1], "in")
         self.assertEqual(vrf[3], ["+70000000107"])
 
+    # Check that current hashes and terminal statuses determine whether audio is pending.
     def test_queue_respects_hashes_and_terminal_manifest_states(self):
         items = {name: self.item(name + ".m4a") for name in ("fresh", "done", "changed", "skipped", "refused")}
         for name in ("done", "changed"):
@@ -121,10 +128,12 @@ class ArchiveTests(TemporaryArchive):
 
 
 class PipelineTests(TemporaryArchive):
+    # Build the default options for pipeline tests with an optional legacy quota flag.
     def args(self, fallback=False):
         return SimpleNamespace(model="first", model_chain=["first", "second"], timeout=10,
                                no_custom_agent=False, stop_on_quota=False, fallback_on_quota=fallback)
 
+    # Check that successful batches publish transcripts, manifest entries, and usage.
     def test_batch_publishes_markdown_manifest_and_usage(self):
         items = [self.item("first.m4a"), self.item("second.m4a")]
         reply = "\n".join(f"=== ITEM {i} ===\n{REPLY}" for i in (1, 2))
@@ -148,6 +157,7 @@ class PipelineTests(TemporaryArchive):
             self.assertFalse(Path(item["target_md"] + ".part").exists())
         self.assertEqual(len(archive.load_manifest_state()), 2)
 
+    # Check that published Markdown inherits its recording date as mtime.
     def test_commit_md_sets_mtime_from_recorded_at(self):
         item = self.item("call_2024-06-04_13-18-54_incoming.m4a")
         item["dt"] = "2024-06-04T13:18:54"
@@ -157,6 +167,7 @@ class PipelineTests(TemporaryArchive):
         expected_ts = datetime.fromisoformat("2024-06-04T13:18:54+03:00").timestamp()
         self.assertAlmostEqual(Path(item["target_md"]).stat().st_mtime, expected_ts, delta=1.0)
 
+    # Check that quota fallback works with and without the legacy compatibility flag.
     def test_quota_fallback_is_automatic_with_or_without_compatibility_flag(self):
         for fallback in (False, True):
             with self.subTest(fallback=fallback):
@@ -171,6 +182,7 @@ class PipelineTests(TemporaryArchive):
                 self.assertGreater(stats.models.remaining('first'), 7800)
                 self.assertEqual(stats.done, 1)
 
+    # Check that model refusals try eligible alternatives without publishing Markdown.
     def test_refusal_tries_chain_without_publishing_a_transcript(self):
         item = self.item()
         refused = envelope("Your previous response was blocked by content safety filters", "ERROR")
@@ -182,6 +194,7 @@ class PipelineTests(TemporaryArchive):
         self.assertEqual(run.call_count, 2)
         self.assertFalse(Path(item["target_md"]).exists())
 
+    # Check fallback after service overload for both short batches and long recordings.
     def test_503_switches_across_model_chain_for_batches_and_long_items(self):
         err503 = (
             3,
@@ -227,6 +240,7 @@ class PipelineTests(TemporaryArchive):
         self.assertEqual(exhaust_stats.errors, 0)
         self.assertFalse(Path(exhaust_item["target_md"]).exists())
 
+    # Check that salvaged results use one standard warning block after fallback is exhausted.
     def test_salvaged_result_has_one_three_line_warning_block_after_chain_exhaustion(self):
         item = self.item()
         stats = pipeline.Stats()
@@ -242,6 +256,7 @@ class PipelineTests(TemporaryArchive):
         self.assertIn("WARN", lines[header])
         self.assertIn("Готово 1", output.getvalue())
 
+    # Check session continuity and absolute timestamps across parts of a long recording.
     def test_long_recording_keeps_session_and_absolute_timestamps(self):
         item = self.item(duration=20000)
         item["parts"] = [
@@ -260,6 +275,7 @@ class PipelineTests(TemporaryArchive):
         self.assertNotIn("Дубль.", md)
         self.assertEqual((stats.done, stats.audio_ms), (1, 20000))
 
+    # Check that later parts preserve earlier speaker links.
     def test_later_part_updates_do_not_erase_earlier_identity_links(self):
         item = self.item(duration=20000)
         item["parts"] = [
@@ -275,6 +291,7 @@ class PipelineTests(TemporaryArchive):
         self.assertEqual(meta["speakers"]["Известный"]["person"], "known")
         self.assertEqual(meta["identification"], "partial")
 
+    # Check that a filename contact is registered once and reused on later encounters.
     def test_auto_registers_new_named_contact_from_filename_without_duplicating(self):
         item = self.item("Иван Петров_+70000000104_2026-08-01_12-00-00_incoming.m4a")
         item["contact"] = "Иван Петров"
@@ -297,6 +314,7 @@ class PipelineTests(TemporaryArchive):
         self.assertEqual(md_meta["speakers"]["Иван"]["person"], "petrov_ivan")
         self.assertEqual(md_meta["identification"], "complete")
 
+    # Check that a new robot organization is registered even for temporary speakers.
     def test_auto_registers_new_robot_org_even_with_temp_true(self):
         item = self.item("88007008000_88007008000_2025-12-29_15-06-37_outgoing.m4a")
         item["contact"] = "88007008000"
@@ -320,6 +338,7 @@ class PipelineTests(TemporaryArchive):
         self.assertEqual(md_meta["speakers"]["Робот"]["org"], "beeline")
         self.assertEqual(md_meta["identification"], "complete")
 
+    # Check that a distinctive nickname is kept in the catalog and generic forms are discarded.
     def test_auto_appends_distinctive_nickname_without_leaking_into_md_or_adding_banal_forms(self):
         item = self.item("Владимир Смирнов_+70000000108_2026-08-02_12-00-00_incoming.m4a")
         item["contact"] = "Владимир Смирнов"
@@ -353,10 +372,12 @@ class PipelineTests(TemporaryArchive):
 
 
 class CheckpointTests(TemporaryArchive):
+    # Build job options for long-recording checkpoint tests.
     def args(self):
         return SimpleNamespace(model="first", model_chain=["first", "second"], timeout=10,
                                no_custom_agent=False, stop_on_quota=False, fallback_on_quota=False)
 
+    # Construct a two-part recording with fixed segment boundaries.
     def long_item(self):
         item = self.item("long-checkpoint.m4a", duration=20000)
         item["parts"] = [
@@ -365,12 +386,14 @@ class CheckpointTests(TemporaryArchive):
         ]
         return item
 
+    # Store the first accepted segment in a checkpoint for resume tests.
     def save_first_part(self, checkpoint):
         checkpoint.save(1,
                         speakers={"Собеседник": {"person": None, "note": "Не представился."}},
                         lines=[[1000, "Собеседник", "Привет."]],
                         model="first", summary="Обсудили бумагу.")
 
+    # Check that a saved first part is reused and the checkpoint removed after publication.
     def test_resumes_from_saved_part_and_discards_checkpoint(self):
         item = self.long_item()
         checkpoint = checkpoints.LongCheckpoint(item)
@@ -393,6 +416,7 @@ class CheckpointTests(TemporaryArchive):
         self.assertEqual(stats.done, 1)
         self.assertFalse(checkpoint.path.exists())
 
+    # Check that changed segment boundaries invalidate incompatible checkpoints.
     def test_layout_change_ignores_saved_parts(self):
         item = self.long_item()
         checkpoint = checkpoints.LongCheckpoint(item)
@@ -405,6 +429,7 @@ class CheckpointTests(TemporaryArchive):
         self.assertEqual(run.call_count, 2)
         self.assertFalse(checkpoint.path.exists())
 
+    # Check that a corrupt saved part is recomputed while valid earlier parts are reused.
     def test_invalid_saved_part_is_recomputed_without_touching_earlier_part(self):
         item = self.long_item()
         checkpoint = checkpoints.LongCheckpoint(item)
@@ -424,6 +449,7 @@ class CheckpointTests(TemporaryArchive):
 
 
 class AudioTests(TemporaryArchive):
+    # Check that truncated AAC requires recovery and can be prepared through FAAD.
     @unittest.skipUnless(shutil.which("ffprobe") and shutil.which("ffmpeg"), "ffmpeg/ffprobe required")
     def test_truncated_aac_needs_recovery_without_tools_and_recovers_with_faad(self):
         reference = self.item("reference.m4a")
@@ -472,6 +498,7 @@ class AudioTests(TemporaryArchive):
         path.write_bytes(data)
         self.assertIn(item["audio_rel"], {f["audio_rel"] for f in archive.scan_pending()})
 
+    # Check that recovery retry includes previously damaged inputs and excludes empty files.
     def test_retry_recovery_includes_legacy_damage_but_not_empty_inputs(self):
         broken = self.item("broken.m4a")
         empty = self.item("empty.m4a")
@@ -481,6 +508,7 @@ class AudioTests(TemporaryArchive):
         retried = archive.scan_pending(retry_recovery=True)
         self.assertEqual([f["audio_rel"] for f in retried], [broken["audio_rel"]])
 
+    # Check that video contributes only its audio stream and that video without audio is rejected.
     @unittest.skipUnless(shutil.which("ffprobe") and shutil.which("ffmpeg"), "ffmpeg/ffprobe required")
     def test_video_uses_only_audio_and_silent_video_is_rejected(self):
         for sound in (False, True):
@@ -512,6 +540,7 @@ class AudioTests(TemporaryArchive):
                     self.assertEqual(types, ["audio"])
                 self.assertEqual(archive.sha256_file(item["audio_abs"]), digest)
 
+    # Check that a container unsupported by the model can be prepared as WAV.
     @unittest.skipUnless(shutil.which("ffprobe") and shutil.which("ffmpeg"), "ffmpeg/ffprobe required")
     def test_unusual_container_can_fall_back_to_temporary_wav(self):
         item = self.item("sound.blob")
@@ -529,6 +558,7 @@ class AudioTests(TemporaryArchive):
         self.assertEqual(ready["sha256"], digest)
         self.assertEqual(archive.sha256_file(item["audio_abs"]), digest)
 
+    # Check that remuxing and slicing leave the original recording byte-identical.
     @unittest.skipUnless(shutil.which("ffprobe") and shutil.which("ffmpeg"), "ffmpeg/ffprobe required")
     def test_prepare_remuxes_and_slices_without_changing_source(self):
         item = self.item("sample.wav")
@@ -550,6 +580,7 @@ class AudioTests(TemporaryArchive):
 
 
 class RuntimeTests(unittest.TestCase):
+    # Check that the default archive scope and both folder option names behave consistently.
     def test_cli_default_and_folder_aliases(self):
         cwd = Path.cwd()
         cases = (
@@ -568,6 +599,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(Path(run.call_args.args[0].root), root)
             self.assertEqual(run.call_args.args[0].subdir, folder)
 
+    # Check the default model fallback chain.
     def test_cli_default_model_chain(self):
         argv = ["diarize.py", "--dry-run", "--no-faad", "--no-untrunc"]
         with mock.patch("sys.argv", argv), \
@@ -580,12 +612,14 @@ class RuntimeTests(unittest.TestCase):
             ["gemini-4-hydrogen-medium", "gemini-3.8-flash-medium"],
         )
 
+    # Check that recorder prompts avoid assumptions about ownership or the number of speakers.
     def test_recorder_hint_does_not_assume_phone_owner_or_two_people(self):
         hint = prompts.owner_hint("Recordings/mono.wav")
         self.assertNotIn("ivanov_sergey", hint)
         self.assertIn("one speaker key", hint)
         self.assertIn("No device owner", prompts.owner_hint("Phone/2026/call.m4a"))
 
+    # Check that a large catalog is filtered using the recording's contact and phone number.
     def test_prompt_refs_filter_large_catalog_by_item_phone_and_contact(self):
         people = {f"person_{i}": {"name": f"Контакт {i}", "phones": [f"+7000000{i:04d}"]} for i in range(30)}
         people["ivanov_sergey"] = {"name": "Сергей Иванов", "tags": ["owner"]}
@@ -604,6 +638,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(rendered["other_people_keys"]["person_6"], "Контакт 6 [Кузнец, Мастер]")
         self.assertEqual(rendered["other_orgs_keys"]["target_o"], "Такси Пример")
 
+    # Check nearest-owner lookup and the ordering of cached prompt references.
     def test_owner_dotfile_resolution_and_prompt_cache_order(self):
         with tempfile.TemporaryDirectory(prefix="owner-test-") as tmp:
             root = Path(tmp)
@@ -622,6 +657,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertLess(batch.index("Transcribe speech faithfully"), batch.index("people.yaml"))
         self.assertLess(batch.index("people.yaml"), batch.index("ITEM 1:"))
 
+    # Check that processing modules share the same cancellation and console state.
     def test_modules_share_cancellation_and_console_objects(self):
         self.assertIs(runtime.STOP_EVENT, pipeline.STOP_EVENT)
         self.assertIs(runtime.STOP_EVENT, quota.STOP_EVENT)
@@ -630,11 +666,13 @@ class RuntimeTests(unittest.TestCase):
         self.assertIs(runtime.FORCE_STOP_EVENT, pipeline.FORCE_STOP_EVENT)
         self.assertIs(runtime.PRINT_LOCK, console.PRINT_LOCK)
 
+    # Check that the quota wait respects reset information and responds to cancellation.
     def test_quota_wait_uses_reset_and_can_be_interrupted(self):
         now = datetime(2026, 11, 15, 17, 9, 59, tzinfo=timezone.utc)
         self.assertEqual(quota.quota_wait_seconds("Resets in 2h11m10s", now), 7890)
         clock = SimpleNamespace(value=100.0)
 
+        # Advance the fake clock and detect an unexpectedly long polling interval.
         def sleep(seconds):
             self.assertLessEqual(seconds, 15)
             clock.value += seconds
@@ -643,9 +681,11 @@ class RuntimeTests(unittest.TestCase):
         for stop_after, expected in ((None, 7990), (115, 115)):
             clock.value = 100
 
+            # Expose cancellation once the fake clock reaches the selected time.
             def is_set():
                 return stop_after is not None and clock.value >= stop_after
 
+            # Advance simulated time and report whether cancellation occurred.
             def event_wait(seconds):
                 sleep(seconds)
                 return is_set()
@@ -663,6 +703,7 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(clock.value, expected)
                 self.assertIn("Жду 7890с (до ", output.getvalue())
 
+    # Check subprocess envelope handling using a fake agent reply.
     def test_agy_subprocess_envelope_without_starting_agy(self):
         payload = envelope(REPLY)[1]
         result = SimpleNamespace(stdout=payload, stderr="warning", returncode=0)
@@ -677,6 +718,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual((text, conv), (REPLY, "test-conversation"))
         self.assertEqual(usage["input_tokens"], 10)
 
+    # Check that an agent profile is installed even when the shared token file is absent.
     def test_agy_home_without_token_file_installs_reader_profile(self):
         # macOS keeps the login in Keychain, so the token file may be absent.
         with tempfile.TemporaryDirectory() as real, tempfile.TemporaryDirectory() as tmp:
@@ -692,6 +734,7 @@ class RuntimeTests(unittest.TestCase):
                              Path(real, "settings.json").resolve())
             self.assertFalse((cli / "antigravity-oauth-token").exists())
 
+    # Check that the agent command uses the installed reader profile without a token file.
     def test_run_agy_uses_reader_profile_without_token_file(self):
         with tempfile.TemporaryDirectory() as real, tempfile.TemporaryDirectory() as tmp:
             Path(real, "settings.json").write_text("{}")

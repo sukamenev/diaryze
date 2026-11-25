@@ -17,6 +17,7 @@ else:
     from diarizer.identification import split_markdown
 
 
+# Find and optionally correct transcript mtimes to match their recording dates.
 def sync_md_dates(root, *, folder=None, apply=False):
     root = Path(root).resolve()
     text_root = (root / "Text").resolve()
@@ -76,6 +77,7 @@ def sync_md_dates(root, *, folder=None, apply=False):
     return result
 
 
+# Run the transcript date sync with the chosen folder and apply options.
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--folder", help="Optional subfolder under Text/")

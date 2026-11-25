@@ -26,6 +26,7 @@ BOT_NAME_HINTS = (
 WORD_RE = re.compile(r"[а-яёa-z0-9]+(?:[-'][а-яёa-z0-9]+)*", re.I)
 
 
+# Count meaningful words and utterances and detect no-speech transcripts.
 def meaningful_speech_stats(body: str) -> tuple[int, int, bool]:
     """Return (meaningful_word_count, utterance_line_count, is_no_speech) from MD body."""
     words = 0
@@ -43,6 +44,7 @@ def meaningful_speech_stats(body: str) -> tuple[int, int, bool]:
     return words, lines, no_speech
 
 
+# Decide whether the relevant speakers are all robots or transient contacts.
 def _is_bot_or_temp_only(speakers: dict, owner=None) -> bool:
     if not isinstance(speakers, dict) or not speakers:
         return False
@@ -63,6 +65,7 @@ def _is_bot_or_temp_only(speakers: dict, owner=None) -> bool:
     return has_non_owner_bot
 
 
+# Resolve a requested search folder within the transcript tree.
 def _resolve_search_dir(root: Path, folder: str | None) -> Path:
     text_root = (root / "Text").resolve()
     if not folder or folder == ".":
@@ -78,10 +81,12 @@ def _resolve_search_dir(root: Path, folder: str | None) -> Path:
     return target
 
 
+# Strip formatting from a phone number for matching.
 def _phone_digits(raw: str) -> str:
     return re.sub(r"\D+", "", str(raw or ""))
 
 
+# Filter transcripts by metadata, participants, and spoken content.
 def search_transcripts(
     root,
     *,
@@ -227,6 +232,7 @@ def search_transcripts(
     return matches
 
 
+# Render search results as a compact text table.
 def format_table(rows: list[dict]) -> str:
     if not rows:
         return "Ничего не найдено."
@@ -242,6 +248,7 @@ def format_table(rows: list[dict]) -> str:
     return "\n".join(out)
 
 
+# Read search options and print the matching records.
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", default=ROOT, help="Audio archive root (default: current directory)")

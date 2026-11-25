@@ -21,6 +21,7 @@ MetadataDumper.add_representer(Decimal, lambda dumper, value:
     dumper.represent_scalar('tag:yaml.org,2002:float', format(value, '.2f')))
 
 
+# Format a millisecond offset as an archive timestamp.
 def format_ts(ms: int) -> str:
     cs_total = int(round(ms / 10))
     cs = cs_total % 100
@@ -31,11 +32,13 @@ def format_ts(ms: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+# Parse an utterance timestamp into milliseconds.
 def parse_ts_ms(h: str | None, m: str, s: str, frac: str) -> int:
     cs = int(frac) if len(frac) == 2 else int(round(int(frac) / 10))
     return ((int(h or 0) * 3600) + (int(m) * 60) + int(s)) * 1000 + cs * 10
 
 
+# Separate a batch response into blocks keyed by recording number.
 def parse_item_blocks(text: str, count: int) -> dict[int, str]:
     if count == 1 and "=== ITEM 1 ===" not in text:
         return {1: text.strip()}
@@ -49,6 +52,7 @@ def parse_item_blocks(text: str, count: int) -> dict[int, str]:
     return blocks
 
 
+# Extract speaker metadata and timed utterances from one response.
 def parse_speakers_and_lines(raw_block: str, offset_ms: int = 0):
     speakers = None
     lines = []
@@ -74,6 +78,7 @@ def parse_speakers_and_lines(raw_block: str, offset_ms: int = 0):
     return speakers, lines, no_speech
 
 
+# Check that a speaker key can be rendered in transcript lines.
 def _valid_speaker_key(sp_key: str) -> bool:
     return (
         bool(sp_key)
@@ -83,6 +88,7 @@ def _valid_speaker_key(sp_key: str) -> bool:
     )
 
 
+# Find a usable, unique speaker label for an invalid key.
 def _salvage_speaker_key(raw_key: str, existing: dict) -> str:
     cleaned = "".join(c if ord(c) >= 32 and c not in "*:\r\n" else " " for c in raw_key).strip()
     if _valid_speaker_key(cleaned) and cleaned not in existing:
@@ -93,6 +99,7 @@ def _salvage_speaker_key(raw_key: str, existing: dict) -> str:
     return f"Голос {idx}"
 
 
+# Validate speaker links and timecodes and render the final Markdown.
 def validate_and_render_md(
     item: dict,
     speakers: dict | None,
@@ -259,6 +266,7 @@ def validate_and_render_md(
     return f"---\n{yaml_text}\n---\n\n{body}"
 
 
+# Format a recording duration for compact display.
 def format_duration_short(ms: int) -> str:
     sec = ms / 1000.0
     if sec < 60:
@@ -266,6 +274,7 @@ def format_duration_short(ms: int) -> str:
     return f"{sec / 60.0:4.1f}m"
 
 
+# Summarize speaker labels and catalog links for the console.
 def format_speakers_brief(speakers: dict) -> str:
     parts = []
     for sp, info in (speakers or {}).items():

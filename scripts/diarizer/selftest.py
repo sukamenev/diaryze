@@ -10,6 +10,7 @@ from .quota import quota_wait_seconds
 from .transcript import parse_speakers_and_lines, validate_and_render_md
 
 
+# Check transcript parsing, validation, and quota handling without calling a model.
 def run_selftest(args):
     people, orgs = {"ivanov_sergey": {"name": "Сергей Иванов"}}, {}
     sample_item = {

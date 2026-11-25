@@ -32,6 +32,7 @@ from .transcript import (
 )
 
 
+# Save valid model summary metadata without disrupting transcription on parse errors.
 def capture_summary(item, raw):
     try:
         found, summary = response_summary(raw)
@@ -42,6 +43,7 @@ def capture_summary(item, raw):
         record('summary_error', items=[item], error=exc, response=raw)
 
 
+# Record a terminal model refusal in the manifest and run statistics.
 def record_refused(item: dict, reason: str, models_tried: list[str], stats: "Stats"):
     record('refused', items=[item], error=reason, models=models_tried)
     append_manifest({
@@ -58,6 +60,7 @@ def record_refused(item: dict, reason: str, models_tried: list[str], stats: "Sta
     emit(f"[REFUSED] {item['audio_rel']} ({models_lbl}): {str(reason)[:180]}", flush=True)
 
 
+# Distinguish unusable media from recordings that need further recovery.
 def record_audio_problem(item, error, stats, *, stage, sha256=None):
     status = "skipped" if error in NO_RECOVERABLE_AUDIO else NEEDS_RECOVERY
     record(status, items=[item], stage=stage, error=error)
@@ -79,6 +82,7 @@ def record_audio_problem(item, error, stats, *, stage, sha256=None):
 
 
 class Stats:
+    # Initialize shared counters, failure tracking, and model state for the run.
     def __init__(self, pending_count=None):
         self.lock = threading.Lock()
         self.started_at = time.monotonic()
@@ -98,6 +102,7 @@ class Stats:
         self._backend_failures = 0
         self.models = ModelCooldowns()
 
+    # Log failed files and apply backoff when the backend is unavailable.
     def fail(self, items, error, *, stage, model=None, **details):
         record('file_error', items=items, error=error, stage=stage, model=model, **details)
         with self.lock:
@@ -115,6 +120,7 @@ class Stats:
         if delay:
             emit(f'[WARN] Сбой сервиса: пауза перед новыми запросами {delay} с', flush=True)
 
+    # Wait interruptibly for the shared backend pause to expire.
     def wait_backend(self):
         while True:
             with self.lock:
@@ -124,6 +130,7 @@ class Stats:
             if STOP_EVENT.wait(min(delay, 1)):
                 raise InterruptedError('stopped during service cooldown')
 
+    # Collect run counters while the caller holds the statistics lock.
     def _snapshot(self):
         return {
             "done": self.done, "audio_ms": self.audio_ms,
@@ -135,10 +142,12 @@ class Stats:
             "failed_files": len(self.failed_files),
         }
 
+    # Read a consistent snapshot of the current run totals.
     def snapshot(self):
         with self.lock:
             return self._snapshot()
 
+    # Record a published transcript and clear any earlier failure for it.
     def complete(self, item, meta):
         record('file_done', items=[item], model=meta.get('model'), text=item.get('target_md'))
         with self.lock:
@@ -149,6 +158,7 @@ class Stats:
             self._backend_failures = 0
             completed(item, meta, self._snapshot())
 
+    # Accumulate provider token usage across requests.
     def add_usage(self, u: dict):
         if not u:
             return
@@ -158,6 +168,7 @@ class Stats:
             self.tok_out += (u.get("output_tokens") or 0) + (u.get("thinking_tokens") or 0)
 
 
+# Retry each failed batch item so unrelated recordings can still finish.
 def _retry_items_individually(items: list[dict], reason: str, args, people: dict, orgs: dict, stats: Stats):
     for it in items:
         try:
@@ -175,6 +186,7 @@ def _retry_items_individually(items: list[dict], reason: str, args, people: dict
             emit(f"[ERR] {it['audio_rel']}: {reason} -> retry failed: {e2}", file=sys.stderr, flush=True)
 
 
+# Call the provider and normalize failures, usage, and session information.
 def _request(prompt, model, args, stats, items, *, conversation_id=None, **details):
     """Capture provider failures and transient exceptions through the same path."""
     try:
@@ -201,6 +213,7 @@ def _request(prompt, model, args, stats, items, *, conversation_id=None, **detai
     return err, text, cid, home
 
 
+# Parse and validate a model reply as a transcript.
 def _render_reply(item, raw, model, people, orgs, *, salvage=False, reason=""):
     capture_summary(item, raw)
     speakers, lines, no_speech = parse_speakers_and_lines(raw)
@@ -211,6 +224,7 @@ def _render_reply(item, raw, model, people, orgs, *, salvage=False, reason=""):
     )
 
 
+# Turn an unusable model reply into a diagnostic message.
 def _response_error(raw, error):
     # Spoken refusals inside a transcript are not provider refusals.
     is_refusal = raw and 'SPEAKERS_JSON:' not in raw and (
@@ -218,6 +232,7 @@ def _response_error(raw, error):
     return f"{'SAFETY' if is_refusal else 'FORMAT'}: {error}"
 
 
+# Validate a checkpoint before reusing its speakers and local timestamps.
 def _restore_part(item, part, saved, model, people, orgs):
     """Validate a saved part once and return its speaker map and local lines."""
     if not isinstance(saved, dict):
@@ -245,6 +260,7 @@ def _restore_part(item, part, saved, model, people, orgs):
     return speakers, lines
 
 
+# Transcribe one segment with repair, fallback, and conversation continuity.
 def _request_part(item, part, args, people, orgs, stats, attempts, chain,
                   model_idx, conv_id, home, speakers):
     """Recognize one part, returning its data and the updated session state."""
@@ -318,6 +334,7 @@ def _request_part(item, part, args, people, orgs, stats, attempts, chain,
         return sp, plines, used_model, warning, model_idx, conv_id, home
 
 
+# Combine accepted parts into one transcript with recording-relative timestamps.
 def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) -> bool:
     chain = getattr(args, 'model_chain', None) or [args.model]
     attempts = ModelAttempts(chain, stats.models, [item], stop_on_quota=args.stop_on_quota)
@@ -387,6 +404,7 @@ def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) 
         agy_forget(home, conv_id)
 
 
+# Process short recordings together and retry incomplete results.
 def process_short_batch(items: list[dict], args, people: dict, orgs: dict, stats: Stats):
     """Repair invalid answers, then exhaust eligible models before salvage."""
     chain = getattr(args, 'model_chain', None) or [args.model]
@@ -486,6 +504,7 @@ def process_short_batch(items: list[dict], args, people: dict, orgs: dict, stats
         agy_forget(home, conv_id)
 
 
+# Prepare a job's audio and route it through the matching transcription workflow.
 def run_job(job_cands: list[dict], args, stats: Stats):
     people, orgs = load_refs()
     with tempfile.TemporaryDirectory(prefix="diarize_job_") as tmp_dir:
@@ -565,6 +584,7 @@ def run_job(job_cands: list[dict], args, stats: Stats):
                 emit(f"[ERR] batch({len(shorts)}): {e}", file=sys.stderr, flush=True)
 
 
+# Take one standalone recording or a bounded group of short files from the queue.
 def pack_next_job(pending_dq: deque, max_files: int, max_sec: int, max_single_sec: int) -> list[dict] | None:
     """Pull either one long/unsized file or a mini-batch of short files from deque."""
     if not pending_dq:

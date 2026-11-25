@@ -7,6 +7,7 @@ import yaml
 from . import config
 
 
+# Resolve the closest owner metadata for an archive recording.
 def find_folder_owner(audio_rel: str, root: str | None = None) -> tuple[dict | None, str | None]:
     """Read the nearest .owner, respecting recorder/unknown-owner overrides."""
     root_path = Path(root or config.ROOT).resolve()
@@ -26,12 +27,14 @@ def find_folder_owner(audio_rel: str, root: str | None = None) -> tuple[dict | N
     return None, None
 
 
+# Choose a readable speaker label for the device owner.
 def owner_label(folder, people):
     owner = folder["owner"]
     entry = people.get(owner) or {}
     return str(folder.get("label") or entry.get("name") or owner)
 
 
+# Add the known phone owner when every audible participant is a robot.
 def with_silent_phone_owner(speakers, audio_rel, people, *, used_speakers, direction, root=None):
     """Include the known device owner when only robots speak; never invent utterances.
 

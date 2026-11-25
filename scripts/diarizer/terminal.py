@@ -6,6 +6,7 @@ import sys
 import termios
 
 
+# Save and restore terminal settings around archive processing.
 @contextmanager
 def preserve_terminal():
     saved = []
