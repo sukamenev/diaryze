@@ -84,6 +84,8 @@ Listen to the clips in `candidate/` and move the best FLAC to the adjacent `conf
 
 `--prepare-voice-sample` prepares candidates for the selected folder’s owner without starting a transcription. Add a person ID to select one explicitly. `--approve-voice-sample "path/to/2025-03-14_01.flac"` confirms a clip, and `--reject-voice-sample "path/to/2025-03-14_01.flac"` discards its set.
 
+The review prints the model's explanation and audio-read status for each call, including when no clip qualifies. The diagnostic log in `00_Diaryze_Data/logs/` records the requested files and the model's reply.
+
 `--no-voice-samples` starts transcription without preparing or using samples. `--skip-voice-sample-preflight` starts transcription immediately and uses any approved references available.
 
 ## Audio recovery

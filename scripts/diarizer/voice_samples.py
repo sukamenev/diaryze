@@ -14,6 +14,8 @@ from . import config
 from .agy import agy_forget, extract_envelope_error_and_usage, run_agy
 from .archive import is_audio_candidate, is_excluded_source_dir, parse_filename, sha256_file
 from .audio import prepare_audio_work, probe_duration_ms
+from .console import _display, emit
+from .diagnostics import record
 from .owners import find_folder_owner
 from .processes import run_capture
 from .prompt_files import load_prompt
@@ -29,6 +31,7 @@ MAX_SAMPLE_MS = 20_000
 MAX_SOURCE_SEC = 180
 MAX_SOURCE_CALLS = 4
 MAX_CANDIDATES = 3
+READ_STATUS_LABELS = {"read": "audio read", "unreadable": "audio unavailable", "not_attempted": "not attempted"}
 
 
 # Convert a date or timestamp to the recording day in the archive's time zone.
@@ -263,18 +266,45 @@ def _parse_interval(reply, calls):
     }
 
 
-# Validate the model's ordered candidate list and ensure selected clips do not overlap.
-def _parse_candidates(text, calls):
+# Validate the response and require a diagnostic for every call, even with no candidates.
+def _parse_sample_reply(text, calls):
     text = text.strip()
+    if not text:
+        raise ValueError(tr("The model returned an empty voice sample response"))
     fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
     reply = json.loads(fenced[1] if fenced else text)
-    if reply is None:
-        return []
-    if not isinstance(reply, list) or len(reply) > MAX_CANDIDATES:
+    if not isinstance(reply, dict):
+        raise ValueError(tr("Expected a voice sample report with a summary, calls, and candidates"))
+    summary, reports, entries = reply.get("summary"), reply.get("calls"), reply.get("candidates")
+    if not isinstance(summary, str) or not summary.strip() or len(summary) > 600:
+        raise ValueError(tr("Expected a brief explanation of the voice sample outcome"))
+    if not isinstance(reports, list) or len(reports) != len(calls):
+        raise ValueError(tr("Expected one diagnostic report for every source call"))
+
+    by_number = {}
+    for report in reports:
+        if not isinstance(report, dict):
+            raise ValueError(tr("Invalid source call diagnostic"))
+        number, status, detail = report.get("call"), report.get("read_status"), report.get("detail")
+        if (type(number) is not int or not 1 <= number <= len(calls) or number in by_number
+                or not isinstance(status, str) or status not in READ_STATUS_LABELS
+                or not isinstance(detail, str) or not detail.strip() or len(detail) > 500):
+            raise ValueError(tr("Invalid source call diagnostic"))
+        by_number[number] = {"call": number, "read_status": status, "detail": detail.strip()}
+    reports = [by_number[number] for number in sorted(by_number)]
+    return summary.strip(), reports, _parse_candidates(entries, calls, by_number)
+
+
+# Validate candidate intervals, corroboration, and overlap using the per-call report.
+def _parse_candidates(entries, calls, reports):
+    if not isinstance(entries, list) or len(entries) > MAX_CANDIDATES:
         raise ValueError(tr("Expected up to three voice sample candidates"))
     candidates = []
-    for entry in reply:
+    for entry in entries:
         call, metadata = _parse_interval(entry, calls)
+        cited = [entry["call"], *entry["supporting_calls"]]
+        if any(reports[number]["read_status"] != "read" for number in cited):
+            raise ValueError(tr("A candidate cited a call without readable audio"))
         current = metadata["source"]
         if any(prior["audio"] == current["audio"] and
                max(prior["start_ms"], current["start_ms"]) < min(prior["end_ms"], current["end_ms"])
@@ -286,20 +316,39 @@ def _parse_candidates(text, calls):
 
 # Ask for several clips using the same comparative listening session.
 def _request_candidates(person, calls, args):
+    inputs = [{"call": n, "file": item["clean_abs"], "direction": item["direction"],
+               "duration_ms": item["duration_ms"]} for n, item in enumerate(calls, 1)]
     prompt = load_prompt(
         "voice-sample.md", person=person,
-        calls=json.dumps([
-            {"call": n, "file": item["clean_abs"], "direction": item["direction"],
-             "duration_ms": item["duration_ms"]}
-            for n, item in enumerate(calls, 1)
-        ], ensure_ascii=False),
+        calls=json.dumps(inputs, ensure_ascii=False),
+        diagnostic_language="Russian" if getattr(args, "ui", "en") == "ru" else "English",
     )
-    rc, stdout, stderr, home = run_agy(prompt, args.model, args.timeout, not args.no_custom_agent)
-    error, text, _, conversation = extract_envelope_error_and_usage(rc, stdout, stderr)
+    emit(tr("Asking {model} to review {count} calls for voice samples", model=args.model, count=len(calls)))
+    record("voice_sample_request", items=calls, person=person, model=args.model, calls=inputs)
+    home = conversation = None
+    text = ""
     try:
+        rc, stdout, stderr, home = run_agy(prompt, args.model, args.timeout, not args.no_custom_agent)
+        # A successful structured report may mention safety in a per-call diagnostic.
+        error, text, usage, conversation = extract_envelope_error_and_usage(rc, stdout, stderr, detect_safety=False)
         if error:
             raise ValueError(error[:500])
-        return _parse_candidates(text, calls)
+        try:
+            summary, reports, candidates = _parse_sample_reply(text, calls)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(tr("Invalid voice sample response: {error}", error=exc)) from exc
+        record("voice_sample_result", items=calls, person=person, model=args.model, summary=summary,
+               call_diagnostics=reports, candidate_count=len(candidates), response=text, usage=usage)
+        emit(tr("Voice sample result: {summary}", summary=_display(summary)))
+        for report in reports:
+            number = report["call"]
+            emit(tr("Call {number} ({status}) {path}: {detail}", number=number,
+                    status=tr(READ_STATUS_LABELS[report["read_status"]]),
+                    path=_display(calls[number - 1]["audio_rel"]), detail=_display(report["detail"])))
+        return candidates
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        record("voice_sample_request_error", items=calls, person=person, model=args.model, response=text, error=exc)
+        raise
     finally:
         agy_forget(home, conversation)
 
@@ -388,6 +437,7 @@ def prepare_voice_samples(person, source_dir, args, *, target_item=None):
             return existing
         confirm_pending = _review_sets(candidate).get(scope, {})
         if any(os.path.lexists(confirmed / name) for name in confirm_pending):
+            emit(tr("Clips are already awaiting validation in {folder}.", folder=confirmed))
             return []
         candidate.mkdir(parents=True, exist_ok=True)
         confirmed.mkdir(exist_ok=True)
@@ -395,7 +445,12 @@ def prepare_voice_samples(person, source_dir, args, *, target_item=None):
               tempfile.TemporaryDirectory(dir=candidate, prefix=".prepare-") as temporary):
             target_day = _recording_day(target_item) if target_item is not None else None
             calls = _prepare_calls(person, source_dir, target_day, Path(inputs), args)
-            if len(calls) < 2 or STOP_EVENT.is_set():
+            if STOP_EVENT.is_set():
+                return []
+            if len(calls) < 2:
+                record("voice_sample_insufficient_calls", items=calls, person=person, folder=scope, required=2)
+                emit(tr("Prepared {count} calls. Voice comparison needs two readable calls with different contacts.",
+                        count=len(calls)))
                 return []
             candidates = _request_candidates(person, calls, args)
             if STOP_EVENT.is_set():

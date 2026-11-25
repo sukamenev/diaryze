@@ -1,5 +1,7 @@
 """Exercise the review workflow with synthetic audio and a mocked provider."""
 
+import contextlib
+import io
 import json
 from pathlib import Path
 import shutil
@@ -17,6 +19,16 @@ from diarizer import archive, cli, config, prompts, runtime, voice_samples
 
 PERSON = "ivanov_aleksey"
 PEOPLE = {PERSON: {"name": "Алексей Иванов"}}
+
+
+# Build a mock voice sample result, including a report for each input.
+def sample_reply(candidates, *statuses, summary="Reviewed audio"):
+    return {
+        "summary": summary,
+        "calls": [{"call": number, "read_status": status, "detail": f"Diagnostic {number}."}
+                  for number, status in enumerate(statuses, 1)],
+        "candidates": candidates,
+    }
 
 
 class VoiceSampleTests(unittest.TestCase):
@@ -98,9 +110,50 @@ class VoiceSampleTests(unittest.TestCase):
         for invalid in (dict(result, start_ms=-1), dict(result, end_ms=41_000),
                         dict(result, supporting_calls=[1]), dict(result, call=True)):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
-                voice_samples._parse_candidates(json.dumps([invalid]), calls)
+                voice_samples._parse_sample_reply(json.dumps(sample_reply([invalid], "read", "read")), calls)
         with self.assertRaisesRegex(ValueError, "overlap"):
-            voice_samples._parse_candidates(json.dumps([result, dict(result, start_ms=100)]), calls)
+            reply = sample_reply([result, dict(result, start_ms=100)], "read", "read")
+            voice_samples._parse_sample_reply(json.dumps(reply), calls)
+        with self.assertRaisesRegex(ValueError, "without readable audio"):
+            voice_samples._parse_sample_reply(json.dumps(sample_reply([result], "read", "unreadable")), calls)
+
+    # Reject old empty arrays, absent responses, and incomplete per-call diagnostics.
+    def test_requires_a_diagnostic_report_when_no_clip_qualifies(self):
+        calls = [{"audio_rel": "Phone/1.wav"}, {"audio_rel": "Phone/2.wav"}]
+        missing_call = json.dumps(sample_reply([], "read"))
+        for reply, reason in (("", "empty voice sample response"), ("[]", "Expected a voice sample report"),
+                              (missing_call, "every source call")):
+            with self.subTest(reply=reply), self.assertRaisesRegex(ValueError, reason):
+                voice_samples._parse_sample_reply(reply, calls)
+
+    # Report and record the model's per-call reasons even when the candidate list is empty.
+    def test_standalone_preparation_logs_no_candidate_reply(self):
+        calls = [{"audio_rel": f"Phone/{number}.wav", "clean_abs": f"/tmp/{number}.wav",
+                  "direction": "in", "duration_ms": 30_000} for number in (1, 2)]
+        reply = sample_reply([], "read", "unreadable", summary="The second call was blocked by a safety filter.")
+        reply["calls"][1]["detail"] = "read_file reported access denied."
+        response = json.dumps(reply)
+        result = (0, json.dumps({"status": "SUCCESS", "result": response}), "", None)
+        flags = ["diarize.py", "--root", str(self.root), "--folder", "Phone", "--prepare-voice-sample"]
+        with (mock.patch("sys.argv", flags),
+              mock.patch.object(cli, "load_refs", return_value=(PEOPLE, {})),
+              mock.patch.object(voice_samples, "_prepare_calls", return_value=calls),
+              mock.patch.object(voice_samples, "run_agy", return_value=result) as provider,
+              contextlib.redirect_stdout(io.StringIO()) as output):
+            self.assertEqual(cli.main(), 1)
+        provider.assert_called_once()
+        self.assertIn("/tmp/2.wav", provider.call_args.args[0])
+        self.assertIn(reply["summary"], output.getvalue())
+        self.assertIn("Call 2 (audio unavailable) Phone/2.wav: read_file reported access denied.", output.getvalue())
+        log, = config.data_path("logs").glob("diarize-*.jsonl")
+        rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        request = next(row for row in rows if row["event"] == "voice_sample_request")
+        self.assertEqual(request["files"], ["Phone/1.wav", "Phone/2.wav"])
+        self.assertEqual(request["calls"][1]["file"], "/tmp/2.wav")
+        recorded = next(row for row in rows if row["event"] == "voice_sample_result")
+        self.assertEqual(recorded["candidate_count"], 0)
+        self.assertEqual(recorded["call_diagnostics"], reply["calls"])
+        self.assertEqual(recorded["response"], response)
 
     # Check that nested .owner files get independent review sets even for the same person.
     def test_preflight_groups_by_nearest_owner_file(self):
@@ -150,9 +203,11 @@ class VoiceSampleTests(unittest.TestCase):
             {"call": n, "start_ms": 1000, "end_ms": 12_000, "evidence": "fixture",
              "supporting_calls": [2 if n == 1 else 1]} for n in range(1, 4)
         ]
-        result = (0, json.dumps({"status": "SUCCESS", "result": json.dumps(answer)}), "", None)
+        reply = sample_reply(answer, "read", "read", "read")
+        result = (0, json.dumps({"status": "SUCCESS", "result": json.dumps(reply)}), "", None)
 
         with (mock.patch.object(voice_samples, "run_agy", return_value=result) as provider,
+              mock.patch.object(voice_samples, "emit"),
               mock.patch.object(cli, "run_job") as transcribe,
               mock.patch.object(cli, "emit"),
               mock.patch.object(cli, "record")):

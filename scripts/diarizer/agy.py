@@ -113,7 +113,7 @@ def run_agy(prompt: str, model: str, timeout: int, use_custom_agent: bool, conve
 
 
 # Separate transcript text, usage, and session ID from provider errors.
-def extract_envelope_error_and_usage(rc: int, stdout: str, stderr: str):
+def extract_envelope_error_and_usage(rc: int, stdout: str, stderr: str, *, detect_safety=True):
     env = None
     try:
         env = json.loads(stdout)
@@ -129,7 +129,7 @@ def extract_envelope_error_and_usage(rc: int, stdout: str, stderr: str):
     # discard a ready transcript.
     if isinstance(env, dict) and env.get("status") == "SUCCESS":
         text = str(env.get("result") or env.get("response") or "")
-        if SAFETY_ERR_PAT.search(text[:500]):
+        if detect_safety and SAFETY_ERR_PAT.search(text[:500]):
             return f"SAFETY: {text.strip()[:240]}", "", usage, conv_id
         return None, text, usage, conv_id
     msg = ""

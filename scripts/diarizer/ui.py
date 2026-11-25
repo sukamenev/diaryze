@@ -84,6 +84,23 @@ _RUSSIAN = {
     "Voice sample approved: {sample}": "Образец подтверждён: {sample}",
     "Voice sample review rejected: {path}": "Набор кандидатов отклонён: {path}",
     "Voice sample candidates": "Кандидаты на голосовой образец",
+    "Asking {model} to review {count} calls for voice samples": "Запрашиваю у {model} подбор образцов по звонкам ({count})",
+    "Voice sample result: {summary}": "Результат подбора образцов: {summary}",
+    "Call {number} ({status}) {path}: {detail}": "Звонок {number} ({status}) {path}: {detail}",
+    "audio read": "аудио прочитано",
+    "audio unavailable": "аудио недоступно",
+    "not attempted": "чтение не запускалось",
+    "Clips are already awaiting validation in {folder}.": "Клипы уже находятся в {folder} и ждут проверки.",
+    "Prepared {count} calls. Voice comparison needs two readable calls with different contacts.":
+        "Подготовлено звонков: {count}. Для сравнения голоса нужны два читаемых звонка с разными контактами.",
+    "The model returned an empty voice sample response": "Модель вернула пустой ответ на запрос образцов",
+    "Expected a voice sample report with a summary, calls, and candidates":
+        "Ожидался отчёт об образцах с полями summary, calls и candidates",
+    "Expected a brief explanation of the voice sample outcome": "Ожидалось краткое пояснение результата подбора",
+    "Expected one diagnostic report for every source call": "Ожидался один отчёт по каждому исходному звонку",
+    "Invalid source call diagnostic": "Некорректный отчёт об исходном звонке",
+    "A candidate cited a call without readable audio": "Кандидат ссылается на звонок без доступного аудио",
+    "Invalid voice sample response: {error}": "Некорректный ответ при подборе образцов: {error}",
     "Listen to the candidates and move the best FLAC to {folder}. Leave the JSON files in the candidate folder.":
         "Прослушайте кандидатов и перенесите лучший FLAC в {folder}. Оставьте JSON в папке кандидатов.",
     "Then start transcription for the same folder again.": "После этого снова запустите расшифровку той же папки.",

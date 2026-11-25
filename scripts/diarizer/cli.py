@@ -160,7 +160,10 @@ def _run_voice_sample_action(args, source_dir):
                         raise ValueError(tr("Choose a folder with a known phone owner or provide the owner ID"))
                 if person not in people:
                     raise ValueError(tr("Person is missing from the catalog: {person}", person=person))
-                samples = prepare_voice_samples(person, source_dir, args)
+                with run_log() as path:
+                    emit(tr("Diagnostic log: {path}", path=path))
+                    record("voice_sample_preparation_started", person=person, folder=args.subdir, model=args.model)
+                    samples = prepare_voice_samples(person, source_dir, args)
                 if not samples:
                     emit(tr("No suitable voice sample found for {person}", person=person))
                     return 1
