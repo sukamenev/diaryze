@@ -256,8 +256,12 @@ def append_manifest(entry: dict):
 
 # Locate the people and organization catalogs within the archive.
 def catalog_paths():
-    directory = os.path.join(config.ROOT, "docs")
-    return os.path.join(directory, "people.yaml"), os.path.join(directory, "orgs.yaml")
+    paths = []
+    for filename in ("people.yaml", "orgs.yaml"):
+        current = os.path.join(config.ROOT, "Data", filename)
+        legacy = os.path.join(config.ROOT, "docs", filename)
+        paths.append(legacy if not os.path.exists(current) and os.path.exists(legacy) else current)
+    return tuple(paths)
 
 
 # Read and validate a catalog or return an empty index if it is absent.
@@ -282,6 +286,7 @@ def load_refs():
 def init_catalogs():
     """Seed empty catalogs while preserving files the user already has."""
     versions = {"people": PEOPLE_CATALOG_SCHEMA_VERSION, "orgs": ORGS_CATALOG_SCHEMA_VERSION}
+    os.makedirs(os.path.join(config.ROOT, "Data", "voice_samples"), exist_ok=True)
     with CATALOG_LOCK:
         for path, key in zip(catalog_paths(), ("people", "orgs")):
             os.makedirs(os.path.dirname(path), exist_ok=True)

@@ -8,10 +8,12 @@ import argparse
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import threading
 import yaml
 
-from .archive import init_catalogs, load_refs, resolve_source_dir, scan_pending
+from . import config
+from .archive import catalog_paths, init_catalogs, load_refs, resolve_source_dir, scan_pending
 from .audio import _get_libfaad, find_untrunc
 from .config import (
     BATCH_SHORT_MAX, BATCH_SHORT_SEC, CHUNK_SEC, DEFAULT_FALLBACK_MODELS,
@@ -24,7 +26,10 @@ from .console import emit, progress_output, render_finished
 from .selftest import run_selftest
 from .terminal import preserve_terminal
 from .diagnostics import record, run_log
-from .errors import ModelsUnavailable
+from .errors import ModelsUnavailable, classify_error
+from .voice_samples import (
+    has_approved_sample, pending_voice_samples, phone_owner, prepare_voice_samples, review_voice_sample,
+)
 
 
 # Parse CLI options, select the archive, and initialize processing.
@@ -60,6 +65,12 @@ def main():
                     help="Max queue assignments per unchanged file in one run (default: %(default)s)")
     ap.add_argument("--dry-run", action="store_true", help="List pending queue without running agy")
     ap.add_argument("--selftest", action="store_true", help="Run internal parser/validator/recovery self-test")
+    voice = ap.add_mutually_exclusive_group()
+    voice.add_argument("--prepare-voice-sample", metavar="PERSON", help="Find and cut up to three owner samples for review")
+    voice.add_argument("--approve-voice-sample", metavar="FILE", help="Approve one candidate and clear its review set")
+    voice.add_argument("--reject-voice-sample", metavar="DIR", help="Discard a pending review set")
+    ap.add_argument("--skip-voice-sample-preflight", action="store_true",
+                    help="Transcribe immediately using any already approved voice samples")
     args = ap.parse_args()
     if args.max_file_attempts < 1:
         ap.error('--max-file-attempts must be positive')
@@ -87,12 +98,16 @@ def main():
     with use_archive(root) as archive_root:
         args.root = archive_root
         try:
-            resolve_source_dir(args.subdir)
+            source_dir = resolve_source_dir(args.subdir)
         except ValueError as exc:
             ap.error(str(exc))
+        if args.prepare_voice_sample or args.approve_voice_sample or args.reject_voice_sample:
+            if args.dry_run or args.init:
+                ap.error("Voice sample actions cannot be combined with --dry-run or --init")
+            return _run_voice_sample_action(args, source_dir)
         if args.init:
             init_catalogs()
-            emit(f"Справочники: {Path(archive_root) / 'docs'}")
+            emit("Справочники: " + ", ".join(catalog_paths()))
             return
         if not args.dry_run:
             missing = [tool for tool in ("agy", "ffmpeg", "ffprobe") if not shutil.which(tool)]
@@ -105,6 +120,83 @@ def main():
             init_catalogs()
             (Path(archive_root) / "Text").mkdir(exist_ok=True)
         return _run(args)
+
+
+# Run a standalone preparation or review action against the archive's voice samples.
+def _run_voice_sample_action(args, source_dir):
+    try:
+        with stop_signals(), preserve_terminal():
+            if person := args.prepare_voice_sample:
+                people, _ = load_refs()
+                if person not in people:
+                    raise ValueError(f"Нет карточки в справочнике: {person}")
+                samples = prepare_voice_samples(person, source_dir, args)
+                if not samples:
+                    emit(f"Не найден подходящий образец для {person}")
+                    return 1
+                _show_voice_candidates(samples)
+            elif path := args.approve_voice_sample:
+                sample = review_voice_sample(path, approve=True)
+                emit(f"Образец подтверждён: {sample}")
+            else:
+                review_voice_sample(args.reject_voice_sample, approve=False)
+                emit(f"Кандидат отклонён: {args.reject_voice_sample}")
+    except InterruptedError:
+        return 130
+    except (OSError, ValueError, subprocess.TimeoutExpired, yaml.YAMLError) as exc:
+        emit(f"[ERR] {exc}")
+        return 1
+    return 0
+
+
+# Print paths to the listening files and show how to approve the chosen one.
+def _show_voice_candidates(samples):
+    emit("Кандидаты на голосовой образец:\n" + "\n".join(str(path) for path in samples), flush=True)
+    emit('Прослушайте их и выберите один через --approve-voice-sample "путь_к_файлу.flac".')
+
+
+# Stage samples per phone owner folder and reserve transcription for the next run.
+def _voice_sample_preflight(candidates, args):
+    people, _ = load_refs()
+    checked = set()
+    owners_by_folder = {}
+    waiting = False
+    for item in candidates:
+        if STOP_EVENT.is_set():
+            return True
+        parent = Path(item["audio_rel"]).parent
+        if parent not in owners_by_folder:
+            owners_by_folder[parent] = phone_owner(item, people)
+        person, owner_file = owners_by_folder[parent]
+        if not person or owner_file in checked:
+            continue
+        checked.add(owner_file)
+        source = Path(config.ROOT) / Path(owner_file).parent
+        try:
+            samples = pending_voice_samples(person, source)
+            if not samples:
+                if has_approved_sample(person):
+                    continue
+                waiting = True
+                samples = prepare_voice_samples(person, source, args, target_item=item)
+        except InterruptedError:
+            return True
+        except (OSError, ValueError, subprocess.TimeoutExpired, yaml.YAMLError) as exc:
+            waiting = True
+            record('voice_sample_error', items=[item], person=person, error=exc)
+            emit(f"[WARN] {owner_file}: {exc}", flush=True)
+            if getattr(args, "stop_on_quota", False) and classify_error(exc) == "quota":
+                break
+            continue
+        if samples:
+            waiting = True
+            record('voice_samples_pending', items=[item], person=person, paths=[str(path) for path in samples])
+            _show_voice_candidates(samples)
+        else:
+            emit(f"{owner_file}: не удалось подобрать образцы для {person}.")
+    if waiting:
+        emit("Расшифровка отложена. Для запуска с уже доступными эталонами используйте --skip-voice-sample-preflight.")
+    return waiting
 
 
 # Run the worker pool with signal handling, terminal cleanup, and diagnostics.
@@ -149,6 +241,8 @@ def run_workers(args):
         return
     if not cands:
         record('run_finished', summary={'done': 0, 'failed_files': 0}, failed_files=[])
+        return
+    if not getattr(args, 'skip_voice_sample_preflight', False) and _voice_sample_preflight(cands, args):
         return
 
     pending_dq = deque(cands)

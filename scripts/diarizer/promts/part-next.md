@@ -1,3 +1,4 @@
+$voice_reference
 This is part $part_number of the same recording. It overlaps the previous part by
 approximately $overlap_seconds seconds. This part lasts $part_duration
 ($part_duration_ms ms). Read `$path` using read_file.

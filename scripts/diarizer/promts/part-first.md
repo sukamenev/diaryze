@@ -1,5 +1,6 @@
 $rules
 
+$voice_reference
 Read `$path` using read_file. Output only:
 SPEAKERS_JSON: {"Иван": {"person": null, "note": "Evidence or identification limitation"}}
 SUMMARY_JSON: "Краткое содержание уже прослушанной записи, не более 20 слов."

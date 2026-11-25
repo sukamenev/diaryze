@@ -60,7 +60,7 @@ class ArchiveTests(TemporaryArchive):
     def test_whole_archive_scan_excludes_text_services_and_nonaudio(self):
         wanted = {"Phone/2019/call.wav", "Phone/2025/call.m4a", "Recordings/mono.mp3",
                   "Smartphone/voice.opus", "root.amr", "Phone/.контакт.m4a", "Phone/raw"}
-        excluded = {"Text/Phone/fake.wav", "docs/example.wav", "scripts/fixture.wav",
+        excluded = {"Text/Phone/fake.wav", "docs/example.wav", "scripts/fixture.wav", "Data/voice_samples/sample.flac",
                     ".agents/sample.m4a", "Phone/.Trash/deleted.m4a", "Phone/.nomedia"}
         for name in wanted | excluded:
             path = self.root / name
@@ -308,7 +308,7 @@ class PipelineTests(TemporaryArchive):
         self.assertIn("petrov_ivan", people)
         self.assertEqual(people["petrov_ivan"]["name"], "Иван Петров")
         self.assertEqual(people["petrov_ivan"]["phones"], ["+70000000104"])
-        disk_people = yaml.safe_load((self.root / "docs/people.yaml").read_text(encoding="utf-8"))["people"]
+        disk_people = yaml.safe_load((self.root / "Data/people.yaml").read_text(encoding="utf-8"))["people"]
         self.assertIn("petrov_ivan", disk_people)
         md_meta = yaml.safe_load(Path(item["target_md"]).read_text(encoding="utf-8").split("---", 2)[1])
         self.assertEqual(md_meta["speakers"]["Иван"]["person"], "petrov_ivan")
@@ -332,7 +332,7 @@ class PipelineTests(TemporaryArchive):
         self.assertIn("beeline", orgs)
         self.assertEqual(orgs["beeline"]["name"], "Билайн")
         self.assertEqual(orgs["beeline"]["phones"], ["+78000000112"])
-        disk_orgs = yaml.safe_load((self.root / "docs/orgs.yaml").read_text(encoding="utf-8"))["orgs"]
+        disk_orgs = yaml.safe_load((self.root / "Data/orgs.yaml").read_text(encoding="utf-8"))["orgs"]
         self.assertIn("beeline", disk_orgs)
         md_meta = yaml.safe_load(Path(item["target_md"]).read_text(encoding="utf-8").split("---", 2)[1])
         self.assertEqual(md_meta["speakers"]["Робот"]["org"], "beeline")

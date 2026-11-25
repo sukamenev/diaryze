@@ -33,7 +33,8 @@ In the author's runs, **5 hours of Antigravity quota covered roughly 18–26 hou
 ## What the archive contains
 
 - `Text/` mirrors the source paths. `Phone/2025/call.m4a` becomes `Text/Phone/2025/call.m4a.md`.
-- `docs/people.yaml` and `docs/orgs.yaml` hold the catalogs. `docs/manifest.jsonl` records processing history.
+- `Data/people.yaml` and `Data/orgs.yaml` hold the catalogs. Existing archives can keep reading catalogs from `docs/`. `docs/manifest.jsonl` records processing history.
+- `Data/voice_samples/<person>/<phone|recorder>/YYYY-MM-DD_NN.flac` holds approved voice references, independently of the source calls.
 - `work/logs/` holds diagnostics, which can contain model responses.
 - `work/checkpoints/` holds accepted long-recording parts until the final transcript is published.
 
@@ -43,7 +44,7 @@ Keep the checkout separate so the archive can move with its transcripts and cata
 
 Processing creates missing catalogs. To fill them first, run `diaryze --folder "/path/to/recordings" --init` and edit the YAML. Existing catalogs are preserved.
 
-Example card in `docs/people.yaml`.
+Example card in `Data/people.yaml`.
 
 ```yaml
 schema_version: "1.0"
@@ -63,6 +64,14 @@ label: Иван
 ```
 
 diaryze links speakers using filenames, phone numbers, catalog matches, and speech. With enough evidence, it adds a card after checking known names and numbers. Review automatic links and keep card IDs stable because transcripts refer to them. Unknown speakers have `person: null`. One-off participants can use `temp: true` without a card.
+
+### Phone owner voice references
+
+On the first run for phone folders without a known owner's sample, diaryze asks the model to compare short calls with different contacts and cut up to three candidate clips per `.owner` folder. It stops before transcription and prints the files under `work/voice_samples/` for listening.
+
+Select the best clip with `diaryze --approve-voice-sample "path/to/02.flac"`. Approval stores the chosen FLAC and its provenance JSON in `Data/voice_samples/` and clears that review set. Use `--reject-voice-sample "path/to/candidates"` to discard a set. `--prepare-voice-sample PERSON` requests a new review set separately. The next transcription run uses the owner's closest dated reference in either direction. A phone clip wins ties. If the call date is unavailable, the most recent dated reference is used.
+
+`--skip-voice-sample-preflight` starts transcription immediately, using approved references where available. The approved audio files can also be placed manually in the named folders.
 
 ## Audio recovery
 
