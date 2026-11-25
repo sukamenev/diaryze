@@ -68,7 +68,7 @@ class LongCheckpoint:
             del self.parts[key]
 
     # Write the accepted part and updated checkpoint atomically.
-    def save(self, number, *, speakers, lines, model, summary, warning=None):
+    def save(self, number, *, speakers, lines, model, summary, warning=None, voice_sample=None):
         """Store one accepted part atomically, invalidating any later parts."""
         self.drop_from(number)
         self.parts[number] = {
@@ -77,6 +77,7 @@ class LongCheckpoint:
             "model": model,
             "summary": summary,
             "warning": warning,
+            "voice_sample": voice_sample,
         }
         data = {
             "version": CHECKPOINT_VERSION,

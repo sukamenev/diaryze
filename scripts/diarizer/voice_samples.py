@@ -75,11 +75,21 @@ def _recording_day(item):
     return None
 
 
+# Locate the archive's approved voice sample library.
+def _sample_root():
+    return Path(config.ROOT).resolve() / "Data" / "voice_samples"
+
+
 # Find the approved sample directory for a person in the archive data.
 def _sample_dir(person):
     if not isinstance(person, str) or not PERSON_ID.fullmatch(person):
         raise ValueError("Invalid voice sample person ID")
-    return Path(config.ROOT).resolve() / "Data" / "voice_samples" / person
+    return _sample_root() / person
+
+
+# Encode the exact reference sent to the model as portable transcript metadata.
+def voice_sample_value(reference):
+    return Path(reference["file"]).relative_to(_sample_root()).as_posix() if reference else "none"
 
 
 # Identify the cataloged owner whose sample is relevant to this phone call.

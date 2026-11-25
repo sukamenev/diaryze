@@ -142,16 +142,20 @@ def owner_hint(audio_rel: str, root: str | None = None, *, people=None, directio
 
 
 # Describe the approved reference for a recording when its known owner has one.
-def voice_reference(item, people):
-    if reference := owner_reference(item, people):
+def voice_reference(item, people, reference=...):
+    if reference is ...:
+        reference = owner_reference(item, people)
+    if reference:
         return load_prompt('voice-reference.md', reference=json.dumps(reference, ensure_ascii=False))
     return ""
 
 
 # Build the instructions and recording descriptors for short audio files.
-def build_batch_prompt(items: list[dict], people: dict, orgs: dict) -> str:
+def build_batch_prompt(items: list[dict], people: dict, orgs: dict, *, voice_references=None) -> str:
+    if voice_references is None:
+        voice_references = [owner_reference(item, people) for item in items]
     descriptions = []
-    for index, item in enumerate(items, 1):
+    for index, (item, sample) in enumerate(zip(items, voice_references, strict=True), 1):
         descriptions.append('\n'.join((
             f'ITEM {index}:',
             f"- file: `{item['clean_abs']}`",
@@ -162,7 +166,7 @@ def build_batch_prompt(items: list[dict], people: dict, orgs: dict) -> str:
             f"- phones: {item.get('phones', [])}",
             f"- context: {owner_hint(item['audio_rel'], people=people, direction=item.get('direction'))}",
         )))
-        if reference := voice_reference(item, people):
+        if reference := voice_reference(item, people, sample):
             descriptions[-1] += "\n" + reference
     return load_prompt('batch.md', rules=load_prompt('rules.md'),
                        references=format_refs_for_prompt(people, orgs, items),
@@ -171,11 +175,11 @@ def build_batch_prompt(items: list[dict], people: dict, orgs: dict) -> str:
 
 # Build a segment prompt with the context needed for its session.
 def build_part_prompt(item: dict, part: dict, people: dict, orgs: dict, is_first: bool,
-                      *, fresh_session=False, speaker_context=None) -> str:
+                      *, fresh_session=False, speaker_context=None, voice_sample=...) -> str:
     common = {'rules': load_prompt('rules.md'), 'path': part['path'],
               'part_duration': format_ts(part['duration_ms']),
               'part_duration_ms': part['duration_ms'],
-              'voice_reference': voice_reference(item, people)}
+              'voice_reference': voice_reference(item, people, voice_sample)}
     if is_first:
         return load_prompt('part-first.md', **common, audio_rel=item['audio_rel'],
                            total_duration=format_ts(item['duration_ms']),

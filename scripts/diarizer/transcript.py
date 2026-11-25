@@ -256,6 +256,7 @@ def validate_and_render_md(
     if item.get("language"):
         meta["language"] = item["language"]
     meta["model"] = model
+    meta["voice_sample"] = item.get("voice_sample")
     meta["created_at"] = datetime.now(TZ).isoformat(timespec="seconds")
     if notes:
         meta["notes"] = " ".join(notes)

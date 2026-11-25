@@ -135,22 +135,34 @@ class PipelineTests(TemporaryArchive):
 
     # Check that successful batches publish transcripts, manifest entries, and usage.
     def test_batch_publishes_markdown_manifest_and_usage(self):
-        items = [self.item("first.m4a"), self.item("second.m4a")]
+        items = [self.item("first.m4a"), self.item("other/second.m4a")]
+        items[0]["dt"] = "2025-03-14"
+        people = {"ivanov_ivan": {"name": "Иван Иванов"}}
+        scope = self.root / "Phone/2026/other"
+        (scope / ".owner").write_text("type: recorder\n", encoding="utf-8")
+        (self.root / "Phone/.owner").write_text("type: phone\nowner: ivanov_ivan\n", encoding="utf-8")
+        reference = self.root / "Data/voice_samples/ivanov_ivan/phone/2025-03-14_01.flac"
+        reference.parent.mkdir(parents=True)
+        reference.write_bytes(b"approved fixture")
         reply = "\n".join(f"=== ITEM {i} ===\n{REPLY}" for i in (1, 2))
         stats = pipeline.Stats()
-        with mock.patch.object(pipeline, "run_agy", return_value=envelope(reply)), \
+        with mock.patch.object(pipeline, "run_agy", return_value=envelope(reply)) as run, \
                 mock.patch.object(pipeline, "agy_forget"), contextlib.redirect_stdout(io.StringIO()) as output:
-            pipeline.process_short_batch(items, self.args(), {}, {}, stats)
+            pipeline.process_short_batch(items, self.args(), people, {}, stats)
+        prompt = run.call_args.args[0]
+        self.assertEqual(prompt.count(str(reference)), 1)
+        self.assertLess(prompt.index(str(reference)), prompt.index("ITEM 2:"))
         self.assertEqual((stats.done, stats.audio_ms, stats.tok_in, stats.tok_out), (2, 10000, 10, 5))
         self.assertEqual(len(output.getvalue().splitlines()), 6)
         self.assertIn("Готово 1", output.getvalue())
         self.assertIn("Готово 2", output.getvalue())
         self.assertNotIn("\x1b", output.getvalue())
-        for item in items:
+        for item, expected_sample in zip(items, ("ivanov_ivan/phone/2025-03-14_01.flac", "none"), strict=True):
             md = Path(item["target_md"]).read_text()
             self.assertIn("[00:00:01.00] **Собеседник** Привет.", md)
             meta = yaml.safe_load(md.split("---", 2)[1])
             self.assertEqual(meta["schema_version"], "1.0")
+            self.assertEqual(meta["voice_sample"], expected_sample)
             self.assertEqual(meta["sha256"], item["sha256"])
             self.assertEqual(set(meta["speakers"]), {"Собеседник"})
             self.assertEqual(meta["identification"], "unresolved")
@@ -273,6 +285,7 @@ class PipelineTests(TemporaryArchive):
         md = Path(item["target_md"]).read_text()
         self.assertIn("[00:00:12.00] **Собеседник** Продолжение.", md)
         self.assertNotIn("Дубль.", md)
+        self.assertEqual(yaml.safe_load(md.split("---", 2)[1])["voice_sample"], "none")
         self.assertEqual((stats.done, stats.audio_ms), (1, 20000))
 
     # Check that later parts preserve earlier speaker links.
@@ -387,11 +400,11 @@ class CheckpointTests(TemporaryArchive):
         return item
 
     # Store the first accepted segment in a checkpoint for resume tests.
-    def save_first_part(self, checkpoint):
+    def save_first_part(self, checkpoint, voice_sample=None):
         checkpoint.save(1,
                         speakers={"Собеседник": {"person": None, "note": "Не представился."}},
                         lines=[[1000, "Собеседник", "Привет."]],
-                        model="first", summary="Обсудили бумагу.")
+                        model="first", summary="Обсудили бумагу.", voice_sample=voice_sample)
 
     # Check that a saved first part is reused and the checkpoint removed after publication.
     def test_resumes_from_saved_part_and_discards_checkpoint(self):
@@ -400,6 +413,8 @@ class CheckpointTests(TemporaryArchive):
         self.save_first_part(checkpoint)
         saved = json.loads(checkpoint.path.read_text(encoding="utf-8"))
         self.assertNotIn("no_speech", saved["parts"]["1"])
+        del saved["parts"]["1"]["voice_sample"]
+        checkpoint.path.write_text(json.dumps(saved), encoding="utf-8")
 
         second = ('SPEAKERS_JSON: {"Собеседник": {"person": null, "note": "Не представился."}}\n'
                   '[00:00:02.00] **Собеседник** Продолжение.')
@@ -413,8 +428,25 @@ class CheckpointTests(TemporaryArchive):
         md = Path(item["target_md"]).read_text(encoding="utf-8")
         self.assertIn("[00:00:01.00] **Собеседник** Привет.", md)
         self.assertIn("[00:00:12.00] **Собеседник** Продолжение.", md)
+        self.assertIsNone(yaml.safe_load(md.split("---", 2)[1])["voice_sample"])
         self.assertEqual(stats.done, 1)
         self.assertFalse(checkpoint.path.exists())
+
+    # Keep a shared voice reference when resuming a recording processed with that sample.
+    def test_resumes_with_the_same_voice_sample(self):
+        item = self.long_item()
+        label = "ivanov_ivan/phone/2025-03-14_01.flac"
+        reference = self.root / "Data/voice_samples" / label
+        reference.parent.mkdir(parents=True)
+        reference.write_bytes(b"approved fixture")
+        self.save_first_part(checkpoints.LongCheckpoint(item), voice_sample=label)
+        with mock.patch.object(pipeline, "owner_reference", return_value={"person": "ivanov_ivan", "file": str(reference)}), \
+                mock.patch.object(pipeline, "run_agy", return_value=envelope(REPLY)) as run, \
+                mock.patch.object(pipeline, "agy_forget"), contextlib.redirect_stdout(io.StringIO()):
+            pipeline.process_long_item(item, self.args(), {}, {}, pipeline.Stats())
+        self.assertIn(str(reference), run.call_args.args[0])
+        md = Path(item["target_md"]).read_text(encoding="utf-8")
+        self.assertEqual(yaml.safe_load(md.split("---", 2)[1])["voice_sample"], label)
 
     # Check that changed segment boundaries invalidate incompatible checkpoints.
     def test_layout_change_ignores_saved_parts(self):

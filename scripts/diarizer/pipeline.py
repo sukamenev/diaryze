@@ -24,6 +24,7 @@ from .console import completed, emit
 from .diagnostics import record
 from .catalog_fields import response_summary
 from .prompt_files import load_prompt
+from .voice_samples import owner_reference, voice_sample_value
 from .transcript import (
     format_ts,
     parse_item_blocks,
@@ -237,6 +238,8 @@ def _restore_part(item, part, saved, model, people, orgs):
     """Validate a saved part once and return its speaker map and local lines."""
     if not isinstance(saved, dict):
         raise ValueError('saved part is not a mapping')
+    if saved.get('voice_sample') is not None and not isinstance(saved['voice_sample'], str):
+        raise ValueError('invalid voice sample in saved part')
     speakers = saved.get('speakers')
     if speakers is not None and not isinstance(speakers, dict):
         raise ValueError('invalid speakers in saved part')
@@ -262,7 +265,7 @@ def _restore_part(item, part, saved, model, people, orgs):
 
 # Transcribe one segment with repair, fallback, and conversation continuity.
 def _request_part(item, part, args, people, orgs, stats, attempts, chain,
-                  model_idx, conv_id, home, speakers):
+                  model_idx, conv_id, home, speakers, reference):
     """Recognize one part, returning its data and the updated session state."""
     prompt_item = dict(item)  # Keep the previous-part summary across model switches.
     item['summary'] = None
@@ -284,7 +287,7 @@ def _request_part(item, part, args, people, orgs, stats, attempts, chain,
             attempts.started(model_idx)
             prompt = repair_prompt or build_part_prompt(
                 prompt_item, part, people, orgs, is_first=(part['part'] == 1),
-                fresh_session=not conv_id, speaker_context=speakers,
+                fresh_session=not conv_id, speaker_context=speakers, voice_sample=reference,
             )
             err, text, cid, new_home = _request(
                 prompt, cur_model, args, stats, [item], conversation_id=conv_id, part=part['part'],
@@ -315,7 +318,7 @@ def _request_part(item, part, args, people, orgs, stats, attempts, chain,
                        error=exc, response=text)
                 attempt += 1
                 failure = _response_error(text, exc)
-                if (classify_error(failure) != 'content' and attempt < PART_REPAIR_ATTEMPTS
+                if (conv_id and classify_error(failure) != 'content' and attempt < PART_REPAIR_ATTEMPTS
                         and not stats.models.remaining(cur_model)):
                     repair_prompt = load_prompt('repair-part.md', part_number=part['part'],
                                                 error=exc, part_end=format_ts(part['duration_ms']))
@@ -363,6 +366,9 @@ def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) 
         emit(f"Продолжение {item['audio_rel']}: сохранены части 1–{len(restored)} "
              f"из {len(item['parts'])}", flush=True)
         record('checkpoint_resumed', items=[item], parts=len(restored))
+    reference = owner_reference(item, people) if len(restored) < len(item['parts']) else None
+    new_voice_sample = voice_sample_value(reference)
+    voice_samples = set()
     try:
         for part in item['parts']:
             number = part['part']
@@ -372,12 +378,15 @@ def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) 
                 used_model = saved.get('model') or used_model
                 item['summary'] = saved.get('summary')
                 warning = saved.get('warning')
+                voice_sample = saved.get('voice_sample')
             else:
                 sp, plines, used_model, warning, model_idx, conv_id, home = _request_part(
                     item, part, args, people, orgs, stats, attempts, chain,
-                    model_idx, conv_id, home, speakers)
+                    model_idx, conv_id, home, speakers, reference)
+                voice_sample = new_voice_sample
                 checkpoint.save(number, speakers=sp, lines=plines, model=used_model,
-                                summary=item.get('summary'), warning=warning)
+                                summary=item.get('summary'), warning=warning, voice_sample=voice_sample)
+            voice_samples.add(voice_sample)
             if warning:
                 part_warnings.append(warning)
             if sp:
@@ -392,6 +401,7 @@ def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) 
                         continue
                 last_ms = abs_ms
                 all_lines.append((abs_ms, speaker_id, txt))
+        item['voice_sample'] = next(iter(voice_samples)) if len(voice_samples) == 1 else None
         md = validate_and_render_md(
             item, speakers, all_lines, not all_lines, used_model, people, orgs,
             salvage=bool(part_warnings), extra_notes=part_warnings,
@@ -410,7 +420,10 @@ def process_short_batch(items: list[dict], args, people: dict, orgs: dict, stats
     chain = getattr(args, 'model_chain', None) or [args.model]
     attempts = ModelAttempts(chain, stats.models, items, stop_on_quota=args.stop_on_quota)
     model_idx = 0
-    prompt = build_batch_prompt(items, people, orgs)
+    references = [owner_reference(item, people) for item in items]
+    prompt = build_batch_prompt(items, people, orgs, voice_references=references)
+    for item, reference in zip(items, references, strict=True):
+        item['voice_sample'] = voice_sample_value(reference)
     scope = items[0]['audio_rel'] if len(items) == 1 else f"batch({len(items)})"
     home = conv_id = None
     candidate = None
