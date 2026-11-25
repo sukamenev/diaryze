@@ -107,7 +107,7 @@ class VoiceSampleTests(unittest.TestCase):
                  for path in ("Phone/a.wav", "Phone/b.wav")]
         result = {"call": 1, "start_ms": 0, "end_ms": 12_000, "evidence": "matched",
                   "supporting_calls": [2]}
-        for invalid in (dict(result, start_ms=-1), dict(result, end_ms=41_000),
+        for invalid in (dict(result, start_ms=-1), dict(result, end_ms=4_999), dict(result, end_ms=41_000),
                         dict(result, supporting_calls=[1]), dict(result, call=True)):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 voice_samples._parse_sample_reply(json.dumps(sample_reply([invalid], "read", "read")), calls)
@@ -200,8 +200,9 @@ class VoiceSampleTests(unittest.TestCase):
         outside = self.phone / "Other_+70000000004_2021-05-13_10-00-00_outgoing.wav"
         shutil.copyfile(sources[0], outside)
         answer = [
-            {"call": n, "start_ms": 1000, "end_ms": 12_000, "evidence": "fixture",
-             "supporting_calls": [2 if n == 1 else 1]} for n in range(1, 4)
+            {"call": n, "start_ms": 1000, "end_ms": 1000 + duration, "evidence": "fixture",
+             "supporting_calls": [2 if n == 1 else 1]}
+            for n, duration in enumerate((11_000, 5000, 6500), 1)
         ]
         reply = sample_reply(answer, "read", "read", "read")
         result = (0, json.dumps({"status": "SUCCESS", "result": json.dumps(reply)}), "", None)
@@ -214,9 +215,12 @@ class VoiceSampleTests(unittest.TestCase):
             self.assertIsNone(cli.run_workers(self.args))
             self.assertIsNone(cli.run_workers(self.args))
             provider.assert_called_once()
+            self.assertIn("Choose 5 to 20 seconds", provider.call_args.args[0])
             transcribe.assert_not_called()
         candidates = voice_samples.pending_voice_samples(PERSON, scope)
         self.assertEqual(len(candidates), 3)
+        self.assertEqual(sorted(voice_samples.probe_duration_ms(path)[0] for path in candidates),
+                         [5000, 6500, 11_000])
         item = archive.scan_pending("Phone/2021")[0]
         self.assertIsNone(voice_samples.owner_reference(item, PEOPLE))
         pending = self.root / "00_Diaryze_Data/voice_samples" / PERSON / "phone/candidate"

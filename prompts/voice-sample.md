@@ -6,9 +6,11 @@ across calls.
 Require the same audible voice in at least two calls, with language or call roles
 that support identifying it as the usual device user. Consider borrowed phones,
 background speakers, bots, voicemail, and common call greetings before deciding.
-Choose 10 to 20 seconds per clip of clear, continuous natural speech from one
-call with no overlapping voices. Prefer different calls or non-overlapping
-intervals of the same call. List your strongest candidates first.
+Choose $min_seconds to $max_seconds seconds per clip of clear, continuous natural
+speech from one call with no overlapping voices. Prefer clips of at least 10
+seconds when they have comparable clarity and identity evidence. Shorter clean
+clips within the allowed range are valid candidates. Prefer different calls or
+non-overlapping intervals of the same call. List your strongest candidates first.
 Always return a JSON object with all of these fields, including when no clip qualifies:
 
 - "summary": A short explanation of the outcome, including the main reason when

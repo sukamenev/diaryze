@@ -75,7 +75,9 @@ MODEL_WAIT_POLL_S = 1
 BACKEND_RETRY_BASE_S = 15
 BACKEND_RETRY_MAX_S = 300
 
-PROMPTS_DIR = Path(__file__).with_name("prompts")
+_PACKAGE_DIR = Path(__file__).resolve().parent
+_BUNDLED_PROMPTS = _PACKAGE_DIR / "prompt_resources"
+PROMPTS_DIR = _BUNDLED_PROMPTS if _BUNDLED_PROMPTS.is_dir() else _PACKAGE_DIR.parent.parent / "prompts"
 
 TRANSCRIPT_SCHEMA_VERSION = "1.0"
 NEEDS_RECOVERY = "needs_recovery"

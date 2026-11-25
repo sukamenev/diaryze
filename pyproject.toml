@@ -15,8 +15,11 @@ dependencies = ["PyYAML>=6,<7"]
 diaryze = "diarizer.cli:main"
 
 [tool.setuptools]
-packages = ["diarizer"]
-package-dir = {diarizer = "scripts/diarizer"}
+packages = ["diarizer", "diarizer.prompt_resources"]
+
+[tool.setuptools.package-dir]
+diarizer = "scripts/diarizer"
+"diarizer.prompt_resources" = "prompts"
 
 [tool.setuptools.package-data]
-diarizer = ["prompts/*.md"]
+"diarizer.prompt_resources" = ["*.md"]

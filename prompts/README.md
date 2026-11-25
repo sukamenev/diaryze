@@ -1,6 +1,6 @@
 # Prompt templates
 
-English instructions live here; Python only renders recording and catalog data.
+This directory holds the English templates used by both the checkout and the installed package. Python fills in recording and catalog data.
 
 - `rules.md`: shared requirements for every processing mode, identity evidence,
   summaries, and honest timestamp precision.

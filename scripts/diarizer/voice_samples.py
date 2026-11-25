@@ -26,8 +26,9 @@ from .ui import tr
 SAMPLE_NAME = re.compile(r"(\d{4}-\d{2}-\d{2}|undated)_\d{2,}\.flac")
 PERSON_ID = re.compile(r"[a-z0-9][a-z0-9_-]*")
 CHANNELS = ("phone", "recorder")
-MIN_SAMPLE_MS = 10_000
+MIN_SAMPLE_MS = 5_000
 MAX_SAMPLE_MS = 20_000
+MIN_SOURCE_MS = 10_000
 MAX_SOURCE_SEC = 180
 MAX_SOURCE_CALLS = 4
 MAX_CANDIDATES = 3
@@ -220,7 +221,7 @@ def _prepare_calls(person, source_dir, target_day, temp, args):
             continue
         try:
             duration, _ = probe_duration_ms(call["audio_abs"])
-            if duration is None or not MIN_SAMPLE_MS <= duration <= MAX_SOURCE_SEC * 1000:
+            if duration is None or not MIN_SOURCE_MS <= duration <= MAX_SOURCE_SEC * 1000:
                 continue
             folder = temp / "inputs" / str(len(selected) + 1)
             folder.mkdir(parents=True, exist_ok=True)
@@ -322,6 +323,7 @@ def _request_candidates(person, calls, args):
         "voice-sample.md", person=person,
         calls=json.dumps(inputs, ensure_ascii=False),
         diagnostic_language="Russian" if getattr(args, "ui", "en") == "ru" else "English",
+        min_seconds=MIN_SAMPLE_MS // 1000, max_seconds=MAX_SAMPLE_MS // 1000,
     )
     emit(tr("Asking {model} to review {count} calls for voice samples", model=args.model, count=len(calls)))
     record("voice_sample_request", items=calls, person=person, model=args.model, calls=inputs)
