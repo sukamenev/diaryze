@@ -1,4 +1,4 @@
-"""Render data into the English templates in the archive's promts/ directory."""
+"""Render archive data into the English prompt templates bundled with diaryze."""
 
 import json
 from pathlib import Path

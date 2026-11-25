@@ -14,11 +14,11 @@ import tempfile
 import yaml
 
 if __package__:
-    from .diarizer.archive import sync_file_mtime
+    from .diarizer.archive import append_manifest, load_manifest_state, load_refs, sync_file_mtime
     from .diarizer.config import ROOT
     from .diarizer.identification import patch_markdown, split_markdown
 else:
-    from diarizer.archive import sync_file_mtime
+    from diarizer.archive import append_manifest, load_manifest_state, load_refs, sync_file_mtime
     from diarizer.config import ROOT
     from diarizer.identification import patch_markdown, split_markdown
 
@@ -31,20 +31,8 @@ def migrate(root, *, folder=None, apply=False, patcher=None, journal_prefix="ide
     folder = Path(folder).resolve() if folder else text_root
     if not folder.is_relative_to(text_root.resolve()) or not folder.is_dir():
         raise ValueError("Choose a folder inside " + str(text_root))
-    refs = []
-    for filename, key in (("people.yaml", "people"), ("orgs.yaml", "orgs")):
-        path = root / "docs" / filename
-        refs.append((yaml.safe_load(path.read_text()) or {}).get(key, {}) if path.exists() else {})
-    manifest = root / "docs/manifest.jsonl"
-    state = {}
-    if manifest.exists():
-        for line in manifest.read_text().splitlines():
-            try:
-                record = json.loads(line)
-                if isinstance(record, dict) and "audio" in record:
-                    state[record["audio"]] = record
-            except ValueError:
-                continue
+    refs = load_refs(root=root)
+    state = load_manifest_state(root=root)
     counts = Counter()
     result = {"files": 0, "updated": 0, "unchanged": 0, "failed": [], "manifest_updated": 0}
     journal = None
@@ -58,8 +46,7 @@ def migrate(root, *, folder=None, apply=False, patcher=None, journal_prefix="ide
             return
         entry = dict(previous, schema_version=meta['schema_version'], identification=status,
                      metadata_updated_at=datetime.now().astimezone().isoformat(timespec="seconds"))
-        with manifest.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        append_manifest(entry, root=root)
         state[audio] = entry
         result["manifest_updated"] += 1
 

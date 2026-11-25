@@ -56,7 +56,7 @@ MODEL_WAIT_POLL_S = 1
 BACKEND_RETRY_BASE_S = 15
 BACKEND_RETRY_MAX_S = 300
 
-PROMPTS_DIR = Path(__file__).with_name("promts")
+PROMPTS_DIR = Path(__file__).with_name("prompts")
 
 TRANSCRIPT_SCHEMA_VERSION = "1.0"
 NEEDS_RECOVERY = "needs_recovery"
@@ -75,7 +75,7 @@ AGY_SHARED = ("antigravity-oauth-token", "settings.json", "installation_id")
 CUSTOM_AGENT_NAME = "audio-reader"
 
 
-EXCLUDED_DIRS = {"text", "data", "docs", "scripts", "work", "promts", ".git", ".agents", ".codex", ".aws", ".bin", "__pycache__", "@eadir", ".venv"}
+EXCLUDED_DIRS = {"text", "data", "docs", "scripts", "work", "prompts", "promts", ".git", ".agents", ".codex", ".aws", ".bin", "__pycache__", "@eadir", ".venv"}
 
 AUDIO_EXTENSIONS = {
     ".3g2", ".3gp", ".aac", ".ac3", ".adts", ".aif", ".aifc", ".aiff",

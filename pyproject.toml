@@ -19,4 +19,4 @@ packages = ["diarizer"]
 package-dir = {diarizer = "scripts/diarizer"}
 
 [tool.setuptools.package-data]
-diarizer = ["promts/*.md"]
+diarizer = ["prompts/*.md"]

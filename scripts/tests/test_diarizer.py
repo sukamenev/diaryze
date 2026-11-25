@@ -37,7 +37,7 @@ class TemporaryArchive(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory(prefix="diarizer-test-")
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name).resolve()
-        self.manifest = self.root / "docs/manifest.jsonl"
+        self.manifest = self.root / "Data/manifest.jsonl"
         patch = mock.patch.object(config, "ROOT", str(self.root))
         patch.start()
         self.addCleanup(patch.stop)

@@ -225,11 +225,19 @@ def is_excluded_dir(name: str) -> bool:
     return low in EXCLUDED_DIRS or "trash" in low or "корзин" in low
 
 
+# Locate persistent archive data and support older archives that stored it in docs.
+def _archive_data_path(filename, root):
+    root = config.ROOT if root is None else root
+    current = os.path.join(root, "Data", filename)
+    legacy = os.path.join(root, "docs", filename)
+    return legacy if not os.path.exists(current) and os.path.exists(legacy) else current
+
+
 # Index the most recent manifest entry for each recording.
-def load_manifest_state():
+def load_manifest_state(*, root=None):
     """Return latest status map {audio_rel: entry} from manifest.jsonl."""
     state = {}
-    manifest = os.path.join(config.ROOT, "docs", "manifest.jsonl")
+    manifest = _archive_data_path("manifest.jsonl", root)
     if not os.path.exists(manifest):
         return state
     with MANIFEST_LOCK, open(manifest, encoding="utf-8") as f:
@@ -239,7 +247,7 @@ def load_manifest_state():
                 continue
             try:
                 rec = json.loads(line)
-                if "audio" in rec:
+                if isinstance(rec, dict) and "audio" in rec:
                     state[rec["audio"]] = rec
             except json.JSONDecodeError:
                 continue
@@ -247,21 +255,16 @@ def load_manifest_state():
 
 
 # Append a status entry under the shared manifest lock.
-def append_manifest(entry: dict):
-    manifest = os.path.join(config.ROOT, "docs", "manifest.jsonl")
+def append_manifest(entry: dict, *, root=None):
+    manifest = _archive_data_path("manifest.jsonl", root)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
     with MANIFEST_LOCK, open(manifest, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 # Locate the people and organization catalogs within the archive.
-def catalog_paths():
-    paths = []
-    for filename in ("people.yaml", "orgs.yaml"):
-        current = os.path.join(config.ROOT, "Data", filename)
-        legacy = os.path.join(config.ROOT, "docs", filename)
-        paths.append(legacy if not os.path.exists(current) and os.path.exists(legacy) else current)
-    return tuple(paths)
+def catalog_paths(*, root=None):
+    return tuple(_archive_data_path(filename, root) for filename in ("people.yaml", "orgs.yaml"))
 
 
 # Read and validate a catalog or return an empty index if it is absent.
@@ -277,8 +280,8 @@ def _load_catalog(path, key):
 
 
 # Load both catalogs for prompt references and validation.
-def load_refs():
-    people_path, orgs_path = catalog_paths()
+def load_refs(*, root=None):
+    people_path, orgs_path = catalog_paths(root=root)
     return _load_catalog(people_path, "people"), _load_catalog(orgs_path, "orgs")
 
 

@@ -5,12 +5,14 @@ build/
 dist/
 *.egg-info/
 /Text/
+/Data/
 /work/
 /Phone/
 /Recordings/
 /docs/people.yaml
 /docs/orgs.yaml
 /docs/manifest.jsonl
+/scripts/local/
 .owner
 .env
 .env.*

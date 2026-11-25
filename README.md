@@ -26,6 +26,12 @@ diaryze --workers 2 --limit 5
 
 diaryze scans subfolders. From any directory, use `diaryze --folder "/path/to/recordings"`. To process one subfolder and keep the results in the shared archive, use `diaryze --root "/path/to/recordings" --folder Phone/2025`. With PyYAML already installed, `python3 /path/to/diaryze/scripts/diarize.py` accepts the same options.
 
+You can put a symlink named `diaryze` in the archive pointing at your existing checkout. From the archive root, run:
+
+```bash
+python3 diaryze/scripts/diarize.py --root . --folder Phone/2025 --dry-run
+```
+
 `--models model-a,model-b` sets the full model chain. Pass one name to use one model. `--model` sets the first model and keeps the configured fallbacks. diaryze batches short recordings, splits long ones with overlap, and maps timestamps back to the original. Reruns skip transcripts with a matching source hash. An interrupted long recording resumes from saved parts: the checkpoint is tied to the audio hash and part layout and is removed after the transcript is published.
 
 In the author's runs, **5 hours of Antigravity quota covered roughly 18–26 hours of recorded conversations**. Throughput varies with models, recordings, retries, and worker count.
@@ -33,10 +39,11 @@ In the author's runs, **5 hours of Antigravity quota covered roughly 18–26 hou
 ## What the archive contains
 
 - `Text/` mirrors the source paths. `Phone/2025/call.m4a` becomes `Text/Phone/2025/call.m4a.md`.
-- `Data/people.yaml` and `Data/orgs.yaml` hold the catalogs. Existing archives can keep reading catalogs from `docs/`. `docs/manifest.jsonl` records processing history.
+- `Data/people.yaml` and `Data/orgs.yaml` hold the catalogs. `Data/manifest.jsonl` records processing history. Existing archives can still use any of these files in `docs/`.
 - `Data/voice_samples/<person>/<phone|recorder>/YYYY-MM-DD_NN.flac` holds approved voice references, independently of the source calls.
 - `work/logs/` holds diagnostics, which can contain model responses.
 - `work/checkpoints/` holds accepted long-recording parts until the final transcript is published.
+- `work/reports/` holds archive-specific reports and benchmark results.
 
 Keep the checkout separate so the archive can move with its transcripts and catalogs. Originals stay in place. `agy` sends the audio and transcription context to the model provider.
 
@@ -104,7 +111,7 @@ python3 /path/to/diaryze/scripts/find.py --root "/path/to/recordings" --folder P
 | [relink_catalog_speakers.py](scripts/relink_catalog_speakers.py) | Match unlinked speakers to existing cards. |
 | [migrate_identification.py](scripts/migrate_identification.py), [migrate_phone_owners.py](scripts/migrate_phone_owners.py), [migrate_catalog_fields.py](scripts/migrate_catalog_fields.py) | Preview transcript migrations. Use `--apply` to write changes. |
 
-Defaults and fallbacks are in [config.py](scripts/diarizer/config.py). Model instructions are in [promts/](scripts/diarizer/promts/README.md).
+Defaults and fallbacks are in [config.py](scripts/diarizer/config.py). Model instructions are in [prompts/](scripts/diarizer/prompts/README.md). Put temporary scripts in the Git-ignored `scripts/local/` directory of the checkout.
 
 From the checkout, `diaryze --selftest` checks tool availability. Run `python3 -m unittest discover -s scripts/tests -q` for offline tests with synthetic audio and mock model responses.
 

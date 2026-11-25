@@ -136,13 +136,13 @@ speakers:
             path = root / "Text/Recordings/test.wav.md"
             path.parent.mkdir(parents=True)
             path.write_bytes(self.sample())
-            docs = root / "docs"
-            docs.mkdir()
-            (docs / "people.yaml").write_text(yaml.safe_dump({"people": PEOPLE}))
+            data = root / "Data"
+            data.mkdir()
+            (data / "people.yaml").write_text(yaml.safe_dump({"people": PEOPLE}))
             record = {"audio": "Recordings/test.wav", "text": "Text/Recordings/test.wav.md",
                       "status": "done", "schema_version": "1.0", "sha256": "a" * 64,
                       "created_at": "original date", "model": "original model"}
-            manifest = docs / "manifest.jsonl"
+            manifest = data / "manifest.jsonl"
             manifest.write_text(json.dumps(record) + "\n")
             dry = migrate(root)
             self.assertEqual(dry["updated"], 1)
