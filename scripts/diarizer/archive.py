@@ -9,6 +9,7 @@ import threading
 import yaml
 
 from . import config
+from .ui import tr
 from .config import AUDIO_EXTENSIONS, EXCLUDED_DIRS, EXCLUDED_FILES, NEEDS_RECOVERY, NO_RECOVERABLE_AUDIO, TRANSCRIPT_SCHEMA_VERSION, TZ
 
 
@@ -184,12 +185,12 @@ def resolve_source_dir(folder):
     root = os.path.realpath(config.ROOT)
     path = os.path.realpath(os.path.join(root, os.path.expanduser(folder)))
     if os.path.commonpath([root, path]) != root:
-        raise ValueError("Папка должна находиться внутри " + config.ROOT)
+        raise ValueError(tr("Folder must be inside {root}", root=config.ROOT))
     rel = os.path.relpath(path, root)
     if any(is_excluded_dir(part) for part in rel.split(os.sep)):
-        raise ValueError("Служебная папка исключена из поиска: " + folder)
+        raise ValueError(tr("Service folder is excluded from scanning: {folder}", folder=folder))
     if not os.path.isdir(path):
-        raise ValueError("Папка не найдена: " + folder)
+        raise ValueError(tr("Folder not found: {folder}", folder=folder))
     return path
 
 
@@ -275,7 +276,7 @@ def _load_catalog(path, key):
     except FileNotFoundError:
         return {}
     if not isinstance(data, dict) or not isinstance(data.get(key), dict):
-        raise ValueError(f"Expected a YAML mapping named {key!r} in {path}")
+        raise ValueError(tr("Expected a YAML mapping named {key!r} in {path}", key=key, path=path))
     return data[key]
 
 

@@ -10,6 +10,7 @@ import time
 from .config import MODEL_ERROR_POLICIES, QUOTA_MIN_WAIT_S, QUOTA_RESET_BUFFER_S, TZ
 from .console import emit
 from .runtime import STOP_EVENT
+from .ui import tr
 
 
 QUOTA_WAIT_LOCK = threading.Lock()
@@ -57,11 +58,9 @@ def wait_for_quota_reset(err_msg: str):
             return
         sleep_s = quota_wait_seconds(err_msg)
         resume_at = datetime.now(TZ) + timedelta(seconds=sleep_s)
-        emit(
-            f"\n[{datetime.now(TZ).strftime('%H:%M:%S')}] Лимит квоты ({err_msg[:140]}). "
-            f"Жду {sleep_s}с (до {resume_at:%Y-%m-%d %H:%M:%S %z})...",
-            flush=True,
-        )
+        message = tr("Quota limit ({error}). Waiting {seconds}s (until {resume:%Y-%m-%d %H:%M:%S %z})...",
+                     error=err_msg[:140], seconds=sleep_s, resume=resume_at)
+        emit(f"\n[{datetime.now(TZ):%H:%M:%S}] {message}", flush=True)
         end_t = time.monotonic() + sleep_s
         while time.monotonic() < end_t:
             if STOP_EVENT.wait(min(15, max(0, end_t - time.monotonic()))):

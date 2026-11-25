@@ -26,6 +26,8 @@ diaryze --workers 2 --limit 5
 
 diaryze uses the current directory as the archive root by default. Use `diaryze --root "/path/to/recordings"` from elsewhere. Use `--folder Phone/2025` to limit both transcription and candidate preparation to a folder within the archive. With PyYAML already installed, `python3 /path/to/diaryze/scripts/diarize.py` accepts the same options.
 
+The command-line interface is in English by default. Use `--ui ru` for Russian help, progress and prompts, or `--ui en` to select English explicitly. Transcript language and summary rules are independent of the interface.
+
 You can put a symlink named `diaryze` in the archive pointing at your existing checkout. From the archive root, run:
 
 ```bash

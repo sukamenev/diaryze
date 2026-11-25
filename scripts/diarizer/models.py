@@ -11,6 +11,7 @@ from .diagnostics import record
 from .errors import LABELS, ModelRefused, ModelsUnavailable, ModelTaskFailed, classify_error
 from .quota import quota_wait_seconds
 from .runtime import STOP_EVENT
+from .ui import tr
 
 
 class ModelCooldowns:
@@ -57,8 +58,8 @@ class ModelCooldowns:
         record('model_cooldown', items=items, model=model, reason=kind, policy_scope='model',
                seconds=seconds, resume_at=resume_at.isoformat(timespec='seconds'))
         prefix = f"{scope}: " if scope else ""
-        emit(f"[WARN] {prefix}{LABELS[kind]} на {model}; пауза {math.ceil(seconds)} с "
-             f"для всех работников (до {resume_at:%H:%M:%S %z})")
+        emit(tr("[WARN] {prefix}{reason} on {model}; paused for all workers for {seconds} s (until {resume:%H:%M:%S %z})",
+                prefix=prefix, reason=tr(LABELS[kind]), model=model, seconds=math.ceil(seconds), resume=resume_at))
 
     # Apply the shared failure policy for a model and return its error category.
     def failed(self, model, error, *, items=(), scope=""):
@@ -78,8 +79,9 @@ class ModelCooldowns:
                policy_scope=policy['scope'], failure_count=count, threshold=threshold, error=error)
         if policy['scope'] == 'run':
             record('model_disabled', items=items, model=model, reason=kind, error=error)
-            emit(f"[WARN] {scope + ': ' if scope else ''}{model}: {LABELS[kind]}; "
-                 f"исключена до конца запуска. {_display(str(error)[:240])}")
+            emit(tr("[WARN] {prefix}{model}: {reason}; disabled for this run. {error}",
+                    prefix=f"{scope}: " if scope else "", model=model,
+                    reason=tr(LABELS[kind]), error=_display(str(error)[:240])))
         elif policy['scope'] == 'model' and count >= policy.get('threshold', 1):
             seconds = quota_wait_seconds(str(error)) if kind == 'quota' else policy['cooldown_s']
             self.block(model, kind=kind, seconds=seconds, items=items, scope=scope)
@@ -107,9 +109,10 @@ class ModelCooldowns:
                 all_disabled = all(m in disabled for m in chain)
                 record('models_unavailable', items=items, models=chain,
                        disabled=reasons, all_disabled=all_disabled)
-                raise ModelsUnavailable("Нет доступных моделей: " + "; ".join(
-                    f"{m}: {_display(str(reasons.get(m, 'исключена для текущего задания'))[:240])}" for m in chain),
-                    all_disabled=all_disabled)
+                excluded = tr("excluded for this job")
+                details = "; ".join(f"{m}: {_display(reasons.get(m, excluded)[:240])}" for m in chain)
+                raise ModelsUnavailable(tr("No models available: {reasons}", reasons=details),
+                                        all_disabled=all_disabled)
             selected = next((i for i in order if i in left and not left[i]), None)
             if selected is not None:
                 skipped = {chain[i]: disabled.get(chain[i], left.get(i, 0))
@@ -124,8 +127,8 @@ class ModelCooldowns:
                 resume_at = datetime.now(TZ) + timedelta(seconds=delay)
                 record('models_wait', items=items, seconds=delay,
                        models=[chain[i] for i in left], resume_at=resume_at.isoformat(timespec='seconds'))
-                emit(f"[WARN] Все доступные модели на паузе; жду {math.ceil(delay)} с "
-                     f"(до {resume_at:%H:%M:%S %z}; Ctrl+C — остановить)")
+                emit(tr("[WARN] All available models are paused; waiting {seconds} s "
+                        "(until {resume:%H:%M:%S %z}; Ctrl+C to stop)", seconds=math.ceil(delay), resume=resume_at))
                 announced = True
             if STOP_EVENT.wait(min(delay, MODEL_WAIT_POLL_S)):
                 raise InterruptedError("stopped while waiting for model availability")
@@ -155,7 +158,7 @@ class ModelAttempts:
             details = "; ".join(f"{self.chain[i]}: {message}" for i, message in self.errors.items())
             if self.excluded and all(kind == 'content' for kind in self.excluded.values()):
                 raise ModelRefused(details, self.tried) from exc
-            raise ModelTaskFailed("Цепочка моделей не обработала задание: " + details) from exc
+            raise ModelTaskFailed(details) from exc
 
     # Remember which models actually received a request for this task.
     def started(self, index):
@@ -173,6 +176,6 @@ class ModelAttempts:
             raise RuntimeError("QUOTA: " + str(error))
         if policy['scope'] == 'task' or (policy['scope'] == 'model' and not self.registry.remaining(model)):
             self.excluded[index] = kind
-            emit(f"[WARN] {scope + ': ' if scope else ''}{LABELS[kind]} на {model}; "
-                 "пробую другую модель для этого задания")
+            emit(tr("[WARN] {prefix}{reason} on {model}; trying another model for this job",
+                    prefix=f"{scope}: " if scope else "", reason=tr(LABELS[kind]), model=model))
         return self.select((index + 1) % len(self.chain))

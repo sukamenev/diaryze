@@ -5,6 +5,7 @@ import re
 import subprocess
 
 from .config import QUOTA_ERR_PAT, SAFETY_ERR_PAT, UNAVAILABLE_503_PAT
+from .ui import tr
 
 
 class ModelRefused(RuntimeError):
@@ -16,7 +17,10 @@ class ModelRefused(RuntimeError):
 
 
 class ModelTaskFailed(RuntimeError):
-    pass
+    # Preserve the diagnostic used in transcript notes independently of the UI.
+    def __init__(self, details):
+        super().__init__(f"Цепочка моделей не обработала задание: {details}")
+        self.details = details
 
 
 class MediaInputError(RuntimeError):
@@ -36,12 +40,11 @@ PREFIXES = {
     "FATAL": "fatal", "FORMAT": "format", "INPUT": "input", "MEDIA": "media",
 }
 LABELS = {
-    "503": "перегрузка / 503", "server": "сбой сервера", "connection": "сбой соединения",
-    "timeout": "таймаут", "quota": "квота", "fatal": "ошибка доступа или модели",
-    "content": "отказ по содержимому", "format": "неверный формат ответа",
-    "input": "неподдерживаемые входные данные или размер запроса",
-    "media": "повреждённые медиаданные",
-    "unknown": "неизвестная ошибка",
+    "503": "overload / 503", "server": "server failure", "connection": "connection failure",
+    "timeout": "timeout", "quota": "quota", "fatal": "model or access error",
+    "content": "content refusal", "format": "invalid response format",
+    "input": "unsupported input or request size", "media": "damaged media",
+    "unknown": "unknown error",
 }
 _FATAL = re.compile(
     r"invalid[ _-]?api[ _-]?key|incorrect[ _-]?api[ _-]?key|unauthorized|authentication failed|"
@@ -63,6 +66,13 @@ _INPUT_SIZE = re.compile(
 _HTTP_CODE = re.compile(
     r"(?:\b(?:http(?:/[\d.]+)?|code|status(?:_code)?|error_code)\s*[\"':=() ]*|\bHTTPError:\s*)"
     r"(401|403|404|429|500|502|503|504)\b", re.I)
+
+
+# Localize the task error heading while preserving raw provider diagnostics.
+def ui_error(error):
+    if isinstance(error, ModelTaskFailed):
+        return tr("The model chain could not process the job: {details}", details=error.details)
+    return str(error)
 
 
 # Map provider failures to the categories used by retry policies.

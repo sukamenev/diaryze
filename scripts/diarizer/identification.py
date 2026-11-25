@@ -10,10 +10,10 @@ from .config import TRANSCRIPT_SCHEMA_VERSION, TS_LINE_RE
 STATUSES = {"unresolved", "partial", "complete", "not_applicable"}
 LEGACY_STATUSES = STATUSES | {"not_checked"}
 STATUS_LABELS = {
-    "unresolved": "не установлены",
-    "partial": "частично",
-    "complete": "установлены",
-    "not_applicable": "без речи",
+    "unresolved": "unresolved",
+    "partial": "partially identified",
+    "complete": "identified",
+    "not_applicable": "no speech",
 }
 
 

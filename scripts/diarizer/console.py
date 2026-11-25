@@ -11,6 +11,7 @@ import unicodedata
 from .config import TZ
 from .identification import STATUS_LABELS
 from .runtime import CONSOLE_INTERRUPTED, PRINT_LOCK, STOP_EVENT
+from .ui import tr
 
 
 _LIVE = None
@@ -158,7 +159,7 @@ def emit(message, *, file=None, flush=True, final=False):
 
 # Format a recording's duration for the completion display.
 def _duration(ms):
-    return f"{ms / 1000:.0f} с" if ms < 60000 else f"{ms / 60000:.1f} мин"
+    return f"{ms / 1000:.0f} {tr('s')}" if ms < 60000 else f"{ms / 60000:.1f} {tr('min')}"
 
 
 # Format elapsed time for progress and run totals.
@@ -166,35 +167,35 @@ def format_time(seconds):
     hours, remainder = divmod(max(0, int(seconds)), 3600)
     minutes, seconds = divmod(remainder, 60)
     if hours:
-        return f"{hours} ч {minutes:02d} мин {seconds:02d} с"
+        return f"{hours} {tr('h')} {minutes:02d} {tr('min')} {seconds:02d} {tr('s')}"
     if minutes:
-        return f"{minutes} мин {seconds:02d} с"
-    return f"{seconds} с"
+        return f"{minutes} {tr('min')} {seconds:02d} {tr('s')}"
+    return f"{seconds} {tr('s')}"
 
 
 # Build the compact status line for work in progress.
 def render_progress(stats, palette, *, clock=False):
     # Render a single progress field with optional emphasis.
     def field(label, value):
-        return palette.dim(label) + " " + _display(value)
+        return palette.dim(tr(label)) + " " + _display(value)
 
-    parts = [field("Готово", stats["done"])]
+    parts = [field("Done", stats["done"])]
     if stats.get("remaining") is not None:
-        parts.append(field("в очереди", stats["remaining"]))
+        parts.append(field("queued", stats["remaining"]))
     duration = format_time(stats["audio_ms"] / 1000) if clock else _duration(stats["audio_ms"])
-    parts.append(field("всего аудио", duration))
+    parts.append(field("audio total", duration))
     speed = stats["audio_ms"] / (1000 * max(1e-6, stats["elapsed_s"]))
     parts.append(palette.paint(f"x{speed:.1f}", "1"))
-    for key, label, color in (("skipped", "пропуски", "33"),
-                              ("needs_recovery", "нужно восстановить", "33"),
-                              ("refused", "отказы", "33"), ("errors", "сбои", "1;31")):
+    for key, label, color in (("skipped", "skipped", "33"),
+                              ("needs_recovery", "needs recovery", "33"),
+                              ("refused", "refused", "33"), ("errors", "errors", "1;31")):
         if stats.get(key):
-            parts.append(palette.paint(f"{label} {stats[key]}", color))
+            parts.append(palette.paint(f"{tr(label)} {stats[key]}", color))
     if stats.get('failed_files'):
-        parts.append(palette.paint(f"не обработано после сбоев {stats['failed_files']}", '1;31'))
+        parts.append(palette.paint(tr("still pending after errors {count}", count=stats["failed_files"]), "1;31"))
     tokens = ", ".join(field(label, f"{stats[key] // 1000}k") for label, key in (
-        ("вход", "tok_in"), ("кэш", "tok_cache"), ("выход", "tok_out")))
-    parts.append(palette.dim("токены:") + " " + tokens)
+        ("input", "tok_in"), ("cache", "tok_cache"), ("output", "tok_out")))
+    parts.append(palette.dim(tr("tokens:")) + " " + tokens)
     return " · ".join(parts)
 
 
@@ -206,7 +207,7 @@ def render_completed(item, meta, stats, *, color=None, now=None):
     tag = palette.paint("WARN" if warning else "OK", "1;33" if warning else "1;32")
     path = palette.paint(os.path.abspath(item["target_md"]), "36")
     header = f"{palette.dim(now.strftime('[%H:%M:%S]'))} {tag}  {path}"
-    recorded = str(item.get("recorded_at") or item.get("dt") or "дата неизвестна").replace("T", " ")[:16]
+    recorded = str(item.get("recorded_at") or item.get("dt") or tr("date unknown")).replace("T", " ")[:16]
     details = [palette.dim(recorded), _duration(item["duration_ms"])]
     for speaker, info in (meta.get("speakers") or {}).items():
         if not isinstance(info, dict):
@@ -216,7 +217,7 @@ def render_completed(item, meta, stats, *, color=None, now=None):
     status = meta.get("identification")
     if status in STATUS_LABELS:
         color_code = "32" if status == "complete" else ("2" if status == "not_applicable" else "33")
-        details.append(palette.paint("Участники: " + STATUS_LABELS[status], color_code))
+        details.append(palette.paint(tr("Speakers: {status}", status=tr(STATUS_LABELS[status])), color_code))
     if warning:
         details.append(palette.paint(meta["notes"], "3;33"))
     return header + "\n  " + " · ".join(details) + "\n  " + render_progress(stats, palette)
@@ -238,7 +239,7 @@ def completed(item, meta, stats):
 # Build the final run summary from the worker statistics.
 def render_finished(stats, *, stopped=False, color=None):
     palette = Palette(enabled=color)
-    status = palette.paint("Остановлено" if stopped else "Завершено", "1;33" if stopped else "1;32")
+    status = palette.paint(tr("Stopped" if stopped else "Finished"), "1;33" if stopped else "1;32")
     stats = dict(stats, remaining=None)
     progress = render_progress(stats, palette, clock=True)
-    return f"{status} · {progress} · {palette.dim('время работы')} {format_time(stats['elapsed_s'])}"
+    return f"{status} · {progress} · {palette.dim(tr('elapsed'))} {format_time(stats['elapsed_s'])}"

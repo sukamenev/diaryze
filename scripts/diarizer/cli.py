@@ -26,58 +26,82 @@ from .console import emit, progress_output, render_finished
 from .selftest import run_selftest
 from .terminal import preserve_terminal
 from .diagnostics import record, run_log
-from .errors import ModelsUnavailable, classify_error
+from .errors import ModelsUnavailable, classify_error, ui_error
+from .ui import LANGUAGES, argparse_ui, tr, use_ui
 from .voice_samples import (
     has_approved_sample, import_confirmed_voice_samples, pending_voice_samples, phone_owner, prepare_voice_samples,
     review_voice_sample,
 )
 
 
-# Parse CLI options, select the archive, and initialize processing.
+# Select the interface language before parsing the full command line.
 def main():
-    ap = argparse.ArgumentParser(description="Parallel agy audio diarizer")
-    ap.add_argument("--root", default=".", help="Archive root (default: current directory)")
+    selector = argparse.ArgumentParser(add_help=False)
+    selector.add_argument("--ui", nargs="?", default="en")
+    selected, _ = selector.parse_known_args()
+    language = selected.ui if selected.ui in LANGUAGES else "en"
+    with use_ui(language):
+        with argparse_ui():
+            parser, args = _parse_args()
+        return _main(parser, args)
+
+
+# Parse the command-line options in the selected interface language.
+def _parse_args():
+    ap = argparse.ArgumentParser(description=tr("Parallel agy audio diarizer"))
+    ap.add_argument("--ui", choices=LANGUAGES, default="en", help=tr("Interface language (default: en)"))
+    ap.add_argument("--root", default=".", help=tr("Archive root (default: current directory)"))
     ap.add_argument("--folder", "--subdir", dest="subdir", default=".", metavar="PATH",
-                    help="Folder to scan within the archive (default: the whole archive)")
-    ap.add_argument("--init", action="store_true", help="Create empty local catalogs and exit")
-    ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
-    ap.add_argument("--model", default=DEFAULT_MODEL)
-    ap.add_argument("--models", default="", help="Comma-separated ordered model list (overrides --model + --fallback-models)")
+                    help=tr("Folder to scan within the archive (default: the whole archive)"))
+    ap.add_argument("--init", action="store_true", help=tr("Create empty local catalogs and exit"))
+    ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help=tr("Number of parallel workers"))
+    ap.add_argument("--model", default=DEFAULT_MODEL, help=tr("Initial model"))
+    ap.add_argument("--models", default="", help=tr("Comma-separated ordered model list (overrides --model + --fallback-models)"))
     ap.add_argument("--fallback-models", default=DEFAULT_FALLBACK_MODELS,
-                        help="Comma-separated fallback models for provider and task errors")
+                        help=tr("Comma-separated fallback models for provider and task errors"))
     ap.add_argument("--fallback-on-quota", action="store_true",
-                    help="Compatibility option: quota fallback is now automatic")
-    ap.add_argument("--limit", type=int, default=0, help="Max pending files to process (0 = all)")
-    ap.add_argument("--batch-short-max", type=int, default=BATCH_SHORT_MAX, help="Max short files per agy call")
-    ap.add_argument("--batch-short-sec", type=int, default=BATCH_SHORT_SEC, help="Target max short audio sec per agy call")
-    ap.add_argument("--max-single-sec", type=int, default=MAX_SINGLE_SEC, help="Slice recordings longer than this")
-    ap.add_argument("--chunk-sec", type=int, default=CHUNK_SEC)
-    ap.add_argument("--overlap-sec", type=int, default=OVERLAP_SEC)
-    ap.add_argument("--timeout", type=int, default=REQUEST_TIMEOUT_SEC)
-    ap.add_argument("--no-custom-agent", action="store_true", help="Disable minimal custom agent")
-    ap.add_argument("--no-untrunc", action="store_true", help="Disable automatic untrunc fallback for damaged containers")
-    ap.add_argument("--no-faad", action="store_true", help="Disable libfaad2 raw AAC frame recovery")
-    ap.add_argument("--retry-skipped", action="store_true", help="Re-try files previously marked status=skipped in manifest.jsonl")
+                    help=tr("Compatibility option: quota fallback is now automatic"))
+    ap.add_argument("--limit", type=int, default=0, help=tr("Max pending files to process (0 = all)"))
+    ap.add_argument("--batch-short-max", type=int, default=BATCH_SHORT_MAX, help=tr("Max short files per agy call"))
+    ap.add_argument("--batch-short-sec", type=int, default=BATCH_SHORT_SEC, help=tr("Target max short audio sec per agy call"))
+    ap.add_argument("--max-single-sec", type=int, default=MAX_SINGLE_SEC, help=tr("Slice recordings longer than this"))
+    ap.add_argument("--chunk-sec", type=int, default=CHUNK_SEC, help=tr("Length of each segment in seconds"))
+    ap.add_argument("--overlap-sec", type=int, default=OVERLAP_SEC, help=tr("Overlap between segments in seconds"))
+    ap.add_argument("--timeout", type=int, default=REQUEST_TIMEOUT_SEC, help=tr("Request timeout in seconds"))
+    ap.add_argument("--no-custom-agent", action="store_true", help=tr("Disable minimal custom agent"))
+    ap.add_argument("--no-untrunc", action="store_true", help=tr("Disable automatic untrunc fallback for damaged containers"))
+    ap.add_argument("--no-faad", action="store_true", help=tr("Disable libfaad2 raw AAC frame recovery"))
+    ap.add_argument("--retry-skipped", action="store_true", help=tr("Re-try files previously marked status=skipped in manifest.jsonl"))
     ap.add_argument("--retry-recovery", action="store_true",
-                    help="Retry files marked needs_recovery and legacy damaged files marked skipped")
-    ap.add_argument("--retry-refused", action="store_true", help="Re-try files previously marked status=refused in manifest.jsonl")
-    ap.add_argument("--stop-on-quota", action="store_true", help="Exit on quota exhaustion instead of sleeping")
+                    help=tr("Retry files marked needs_recovery and legacy damaged files marked skipped"))
+    ap.add_argument("--retry-refused", action="store_true", help=tr("Re-try files previously marked status=refused in manifest.jsonl"))
+    ap.add_argument("--stop-on-quota", action="store_true", help=tr("Exit on quota exhaustion instead of sleeping"))
     ap.add_argument("--max-file-attempts", type=int, default=MAX_FILE_ATTEMPTS,
-                    help="Max queue assignments per unchanged file in one run (default: %(default)s)")
-    ap.add_argument("--dry-run", action="store_true", help="List pending queue without running agy")
-    ap.add_argument("--selftest", action="store_true", help="Run internal parser/validator/recovery self-test")
+                    help=tr("Max queue assignments per unchanged file in one run (default: %(default)s)"))
+    ap.add_argument("--dry-run", action="store_true", help=tr("List pending queue without running agy"))
+    ap.add_argument("--selftest", action="store_true", help=tr("Run internal parser/validator/recovery self-test"))
     voice = ap.add_mutually_exclusive_group()
     voice.add_argument("--prepare-voice-sample", nargs="?", const=True, metavar="PERSON",
-                       help="Find up to three samples for the folder owner, or specify a person ID")
-    voice.add_argument("--approve-voice-sample", metavar="FILE", help="Approve one candidate and clear its review set")
-    voice.add_argument("--reject-voice-sample", metavar="PATH", help="Discard a pending set by candidate FLAC or folder")
+                       help=tr("Find up to three samples for the folder owner, or specify a person ID"))
+    voice.add_argument("--approve-voice-sample", metavar="FILE", help=tr("Approve one candidate and clear its review set"))
+    voice.add_argument("--reject-voice-sample", metavar="PATH", help=tr("Discard a pending set by candidate FLAC or folder"))
     voice.add_argument("--no-voice-samples", action="store_true",
-                       help="Transcribe without preparing or using any voice samples")
+                       help=tr("Transcribe without preparing or using any voice samples"))
     ap.add_argument("--skip-voice-sample-preflight", action="store_true",
-                    help="Transcribe immediately using any already approved voice samples")
-    args = ap.parse_args()
+                    help=tr("Transcribe immediately using any already approved voice samples"))
+    return ap, ap.parse_args()
+
+
+# Report a validation error using the same headings as the argument parser.
+def _argument_error(parser, message):
+    with argparse_ui():
+        parser.error(message)
+
+
+# Validate the selected options and execute the corresponding archive action.
+def _main(parser, args):
     if args.max_file_attempts < 1:
-        ap.error('--max-file-attempts must be positive')
+        _argument_error(parser, tr("--max-file-attempts must be positive"))
     raw_chain = args.models if args.models.strip() else ",".join(
         x for x in (args.model, args.fallback_models) if x.strip()
     )
@@ -101,23 +125,23 @@ def main():
         try:
             source_dir = resolve_source_dir(args.subdir)
         except ValueError as exc:
-            ap.error(str(exc))
+            _argument_error(parser, str(exc))
         if args.prepare_voice_sample or args.approve_voice_sample or args.reject_voice_sample:
             if args.dry_run or args.init:
-                ap.error("Voice sample actions cannot be combined with --dry-run or --init")
+                _argument_error(parser, tr("Voice sample actions cannot be combined with --dry-run or --init"))
             return _run_voice_sample_action(args, source_dir)
         if args.init:
             init_catalogs()
-            emit("Справочники: " + ", ".join(catalog_paths()))
+            emit(tr("Catalogs: {paths}", paths=", ".join(catalog_paths())))
             return
         if not args.dry_run:
             missing = [tool for tool in ("agy", "ffmpeg", "ffprobe") if not shutil.which(tool)]
             if missing:
-                ap.error("Missing executable(s) on PATH: " + ", ".join(missing))
+                _argument_error(parser, tr("Missing executable(s) on PATH: {tools}", tools=", ".join(missing)))
             try:
                 load_refs()
             except (OSError, ValueError, yaml.YAMLError) as exc:
-                ap.error(str(exc))
+                _argument_error(parser, str(exc))
             init_catalogs()
             config.transcripts_dir().mkdir(parents=True, exist_ok=True)
         return _run(args)
@@ -133,34 +157,35 @@ def _run_voice_sample_action(args, source_dir):
                     marker = Path(source_dir).relative_to(config.ROOT) / ".owner"
                     person, _ = phone_owner({"audio_rel": marker.as_posix()}, people)
                     if person is None:
-                        raise ValueError("Укажите папку с известным владельцем телефона или передайте ID владельца")
+                        raise ValueError(tr("Choose a folder with a known phone owner or provide the owner ID"))
                 if person not in people:
-                    raise ValueError(f"Нет карточки в справочнике: {person}")
+                    raise ValueError(tr("Person is missing from the catalog: {person}", person=person))
                 samples = prepare_voice_samples(person, source_dir, args)
                 if not samples:
-                    emit(f"Не найден подходящий образец для {person}")
+                    emit(tr("No suitable voice sample found for {person}", person=person))
                     return 1
                 _show_voice_candidates(samples)
             elif path := args.approve_voice_sample:
                 sample = review_voice_sample(path, approve=True)
-                emit(f"Образец подтверждён: {sample}")
+                emit(tr("Voice sample approved: {sample}", sample=sample))
             else:
                 review_voice_sample(args.reject_voice_sample, approve=False)
-                emit(f"Кандидат отклонён: {args.reject_voice_sample}")
+                emit(tr("Voice sample review rejected: {path}", path=args.reject_voice_sample))
     except InterruptedError:
         return 130
     except (OSError, ValueError, subprocess.TimeoutExpired, yaml.YAMLError) as exc:
-        emit(f"[ERR] {exc}")
+        emit(f"[ERR] {ui_error(exc)}")
         return 1
     return 0
 
 
 # Print the clips and the destination for the selected files.
 def _show_voice_candidates(samples):
-    emit("Кандидаты на голосовой образец\n" + "\n".join(str(path) for path in samples), flush=True)
+    emit(tr("Voice sample candidates") + "\n" + "\n".join(str(path) for path in samples), flush=True)
     confirmed = samples[0].parent.with_name("confirmed")
-    emit(f"Прослушайте кандидатов и перенесите лучший FLAC в {confirmed}. Оставьте JSON в папке кандидатов.")
-    emit("После этого снова запустите расшифровку той же папки.")
+    emit(tr("Listen to the candidates and move the best FLAC to {folder}. Leave the JSON files in the candidate folder.",
+            folder=confirmed))
+    emit(tr("Then start transcription for the same folder again."))
 
 
 # Stage samples for each phone owner within the requested folder.
@@ -203,9 +228,9 @@ def _voice_sample_preflight(candidates, args):
             record('voice_samples_pending', items=[item], person=person, paths=[str(path) for path in samples])
             _show_voice_candidates(samples)
         else:
-            emit(f"{owner_file}: не удалось подобрать образцы для {person}.")
+            emit(tr("{scope}: no voice samples could be prepared for {person}.", scope=owner_file, person=person))
     if waiting:
-        emit("Расшифровка отложена. Подтвердите образец или запустите с --no-voice-samples.")
+        emit(tr("Transcription is on hold. Approve a sample or rerun with --no-voice-samples."))
     return waiting
 
 
@@ -215,14 +240,14 @@ def _run(args):
         if args.dry_run:
             return run_workers(args)
         with run_log() as path:
-            emit(f'Журнал диагностики: {path}', flush=True)
+            emit(tr("Diagnostic log: {path}", path=path), flush=True)
             record('run_started', options=vars(args))
             try:
                 result = run_workers(args)
                 return 1 if result and result['failed_files'] else 0
             except ModelsUnavailable as exc:
                 record('fatal_error', error=exc)
-                emit(f'[ERR] {exc}')
+                emit(f"[ERR] {ui_error(exc)}")
                 return 1
             except BaseException as exc:
                 record('fatal_error', error=exc)
@@ -235,22 +260,23 @@ def run_workers(args):
     if not args.dry_run and not without_samples:
         for sample in import_confirmed_voice_samples():
             record('voice_sample_confirmed', path=str(sample))
-            emit(f"Образец подтверждён: {sample}", flush=True)
+            emit(tr("Voice sample approved: {sample}", sample=sample), flush=True)
     cands = scan_pending(args.subdir, retry_skipped=args.retry_skipped, retry_refused=args.retry_refused,
                          retry_recovery=getattr(args, "retry_recovery", False))
     if args.limit > 0:
         cands = cands[: args.limit]
-    faad_state = "ok" if args.use_faad else ("disabled" if args.no_faad else "missing")
-    untrunc_state = args.untrunc_bin or ("disabled" if args.no_untrunc else "missing")
+    faad_state = "ok" if args.use_faad else tr("disabled" if args.no_faad else "missing")
+    untrunc_state = args.untrunc_bin or tr("disabled" if args.no_untrunc else "missing")
     models_str = " → ".join(args.model_chain)
-    emit(f"Очередь {args.subdir}: {len(cands)} файлов · faad {faad_state} · untrunc {untrunc_state}", flush=True)
+    emit(tr("Queued files in {folder}: {count} · faad {faad} · untrunc {untrunc}",
+            folder=args.subdir, count=len(cands), faad=faad_state, untrunc=untrunc_state), flush=True)
     if not args.use_faad and not args.no_faad:
-        emit("[WARN] libfaad2 не найдена — восстановление сырых AAC кадров отключено", flush=True)
+        emit(tr("[WARN] libfaad2 is unavailable; raw AAC recovery is disabled"), flush=True)
     if not args.untrunc_bin and not args.no_untrunc:
-        emit("[WARN] untrunc не найден в PATH — запасная автопочинка контейнеров отключена", flush=True)
+        emit(tr("[WARN] untrunc is unavailable; automatic container repair is disabled"), flush=True)
     if args.dry_run:
         if len(cands) > 20:
-            emit(f"Показаны первые 20 из {len(cands)}:")
+            emit(tr("Showing the first 20 of {count}:", count=len(cands)))
         for i, c in enumerate(cands[:20], 1):
             emit(f"  {i:2d}. {c['dt'] or '?'} | {c['audio_rel']}")
         return
@@ -266,7 +292,7 @@ def run_workers(args):
     attempts = Counter()
     max_attempts = getattr(args, 'max_file_attempts', MAX_FILE_ATTEMPTS)
     stats = Stats(pending_count=lambda: len(pending_dq))
-    emit(f"Старт · работников {args.workers} · модели {models_str}", flush=True)
+    emit(tr("Start · workers {workers} · models {models}", workers=args.workers, models=models_str), flush=True)
 
     q_lock = threading.Lock()
 

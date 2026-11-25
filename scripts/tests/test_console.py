@@ -16,6 +16,7 @@ from unittest import mock
 
 from scripts.diarizer.console import emit, render_completed, render_finished
 from scripts.diarizer import console, pipeline, runtime
+from scripts.diarizer.ui import use_ui
 
 
 class TtyBuffer(io.StringIO):
@@ -76,11 +77,22 @@ class ConsoleTests(unittest.TestCase):
         self.assertEqual(len(text.splitlines()), 3)
         self.assertEqual(text.count("[22:43:45]"), 1)
         self.assertIn(self.item["target_md"], text.splitlines()[0])
-        self.assertIn("3.1 мин · S1: Лена · S2: ivanov_sergey", text)
-        self.assertIn("Готово 1 · в очереди 1235 · всего аудио 3.1 мин · x9.1", text)
-        self.assertIn("токены: вход 7k, кэш 0k, выход 5k", text)
-        for absent in ("=", "m/h", "\x1b", "пропуски", "отказы", "ошибки"):
+        self.assertIn("3.1 min · S1: Лена · S2: ivanov_sergey", text)
+        self.assertIn("Done 1 · queued 1235 · audio total 3.1 min · x9.1", text)
+        self.assertIn("tokens: input 7k, cache 0k, output 5k", text)
+        for absent in ("=", "m/h", "\x1b", "skipped", "refused", "errors"):
             self.assertNotIn(absent, text)
+
+    # Translate the console labels while retaining the transcript data in the display.
+    def test_russian_ui_keeps_recording_names_and_transcript_notes(self):
+        self.meta["identification"] = "partial"
+        self.meta["notes"] = "Review note from the transcript."
+        with use_ui("ru"):
+            text = self.render(color=False)
+        self.assertIn("Готово 1", text)
+        self.assertIn("Участники: частично", text)
+        self.assertIn("Review note from the transcript.", text)
+        self.assertIn(self.item["target_md"], text)
 
     # Check that counters and notes are visible within the standard completion block.
     def test_nonzero_counters_and_notes_stand_out_without_extra_lines(self):
@@ -89,7 +101,7 @@ class ConsoleTests(unittest.TestCase):
         text = self.render(color=True)
         self.assertEqual(len(text.splitlines()), 3)
         self.assertIn("\x1b[1;33mWARN", text)
-        self.assertIn("\x1b[1;31mсбои 3", text)
+        self.assertIn("\x1b[1;31merrors 3", text)
         self.assertIn("\x1b[3;33mТребуется проверка.", text)
         plain = re.sub(r"\x1b\[[0-9;]*m", "", text)
         self.assertEqual(plain, self.render(color=False))
@@ -119,20 +131,20 @@ class ConsoleTests(unittest.TestCase):
         self.meta["identification"] = "partial"
         text = self.render(color=False)
         self.assertEqual(len(text.splitlines()), 3)
-        self.assertIn("Участники: частично", text.splitlines()[1])
+        self.assertIn("Speakers: partially identified", text.splitlines()[1])
 
     # Check that the final summary uses human-readable elapsed times.
     def test_final_summary_uses_hours_minutes_and_seconds_without_equals(self):
         self.stats.update(done=158, audio_ms=25428000, elapsed_s=1514)
         text = render_finished(self.stats, stopped=True, color=False)
-        self.assertTrue(text.startswith("Остановлено · Готово 158"))
-        self.assertIn("всего аудио 7 ч 03 мин 48 с", text)
+        self.assertTrue(text.startswith("Stopped · Done 158"))
+        self.assertIn("audio total 7 h 03 min 48 s", text)
         self.assertIn("x16.8", text)
-        self.assertTrue(text.endswith("время работы 25 мин 14 с"))
-        for absent in ("=", "423.8", "1514", "в очереди", "пропуски", "\x1b"):
+        self.assertTrue(text.endswith("elapsed 25 min 14 s"))
+        for absent in ("=", "423.8", "1514", "queued", "skipped", "\x1b"):
             self.assertNotIn(absent, text)
         self.stats["elapsed_s"] = 3605
-        self.assertIn("время работы 1 ч 00 мин 05 с", render_finished(self.stats, color=False))
+        self.assertIn("elapsed 1 h 00 min 05 s", render_finished(self.stats, color=False))
 
     # Check that concurrent writers emit complete blocks without interleaving.
     def test_worker_blocks_do_not_interleave(self):
@@ -184,8 +196,8 @@ class LiveConsoleTests(unittest.TestCase):
             lines = screen_lines(output.getvalue())
             self.assertEqual(len(lines), 5)
             self.assertEqual(sum('example.m4a.md' in line for line in lines), 2)
-            self.assertNotIn('Готово 1', '\n'.join(lines))
-            self.assertIn('Готово 2', lines[-1])
+            self.assertNotIn('Done 1', '\n'.join(lines))
+            self.assertIn('Done 2', lines[-1])
 
     # Check that warnings appear above progress and the final summary clears the live row.
     def test_warning_is_printed_above_status_and_final_summary_replaces_status(self):
@@ -197,11 +209,11 @@ class LiveConsoleTests(unittest.TestCase):
             console.emit('[WARN] Model paused')
             before = screen_lines(output.getvalue())
             self.assertIn('[WARN] Model paused', before[-2])
-            self.assertIn('Готово 1', before[-1])
+            self.assertIn('Done 1', before[-1])
             console.emit(console.render_finished(self.stats), final=True)
             after = screen_lines(output.getvalue())
-            self.assertTrue(after[-1].startswith('Завершено'))
-            self.assertEqual(sum('Готово' in line for line in after), 1)
+            self.assertTrue(after[-1].startswith('Finished'))
+            self.assertEqual(sum('Done' in line for line in after), 1)
             self.assertEqual(sum('[WARN]' in line for line in after), 1)
 
     # Check that pipes and dumb terminals receive plain completion blocks.
@@ -246,7 +258,7 @@ class LiveConsoleTests(unittest.TestCase):
             with self.assertRaises(RuntimeError), console.progress_output():
                 console.completed(self.item, self.meta, self.stats)
                 raise RuntimeError('test failure')
-            self.assertNotIn('Готово', '\n'.join(screen_lines(output.getvalue())))
+            self.assertNotIn('Done', '\n'.join(screen_lines(output.getvalue())))
             with contextlib.redirect_stderr(output), console.progress_output():
                 console.completed(self.item, self.meta, self.stats)
                 runtime.STOP_EVENT.set()
@@ -276,8 +288,8 @@ class LiveConsoleTests(unittest.TestCase):
                 list(pool.map(complete, (1, 2)))
             lines = screen_lines(output.getvalue())
             self.assertEqual(sum('/archive/' in line for line in lines), 2)
-            self.assertEqual(sum('Готово' in line for line in lines), 1)
-            self.assertIn('Готово 2', lines[-1])
+            self.assertEqual(sum('Done' in line for line in lines), 1)
+            self.assertIn('Done 2', lines[-1])
 
     # Check live stderr rendering on a real pseudo-terminal shared with stdout.
     def test_real_pty_stderr_does_not_overwrite_records_or_leave_duplicate_status(self):
@@ -314,8 +326,8 @@ class LiveConsoleTests(unittest.TestCase):
         lines = screen_lines(output.decode())
         self.assertEqual(sum('example.m4a.md' in line for line in lines), 2)
         self.assertEqual(sum('[ERR] Visible error' in line for line in lines), 1)
-        self.assertEqual(sum('Готово' in line for line in lines), 1)
-        self.assertTrue(lines[-1].startswith('Завершено'))
+        self.assertEqual(sum('Done' in line for line in lines), 1)
+        self.assertTrue(lines[-1].startswith('Finished'))
 
 
 if __name__ == "__main__":

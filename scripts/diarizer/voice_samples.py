@@ -18,6 +18,7 @@ from .owners import find_folder_owner
 from .processes import run_capture
 from .prompt_files import load_prompt
 from .runtime import STOP_EVENT
+from .ui import tr
 
 
 SAMPLE_NAME = re.compile(r"(\d{4}-\d{2}-\d{2}|undated)_\d{2,}\.flac")
@@ -82,17 +83,17 @@ def _sample_root():
 # Find the approved sample directory for a person in the archive data.
 def _sample_dir(person):
     if not isinstance(person, str) or not PERSON_ID.fullmatch(person):
-        raise ValueError("Invalid voice sample person ID")
+        raise ValueError(tr("Invalid voice sample person ID"))
     return _sample_root() / person
 
 
 # Locate one recording channel and reject symbolic links along the library path.
 def _channel_dir(person, channel):
     if channel not in CHANNELS:
-        raise ValueError("Invalid voice sample channel")
+        raise ValueError(tr("Invalid voice sample channel"))
     folder = _sample_dir(person) / channel
     if folder.resolve() != folder:
-        raise ValueError(f"Voice sample channel cannot use a symbolic link: {folder}")
+        raise ValueError(tr("Voice sample channel cannot use a symbolic link: {path}", path=folder))
     return folder
 
 
@@ -100,7 +101,7 @@ def _channel_dir(person, channel):
 def _review_dir(folder, status):
     path = folder / status
     if path.resolve() != path:
-        raise ValueError(f"Voice sample review cannot use a symbolic link: {path}")
+        raise ValueError(tr("Voice sample review cannot use a symbolic link: {path}", path=path))
     return path
 
 
@@ -239,7 +240,7 @@ def _prepare_calls(person, source_dir, target_day, temp, args):
 # Verify one proposed interval and its corroborating call indexes.
 def _parse_interval(reply, calls):
     if not isinstance(reply, dict):
-        raise ValueError("Expected a voice sample object or null")
+        raise ValueError(tr("Expected a voice sample object or null"))
     number = reply.get("call")
     start, end = reply.get("start_ms"), reply.get("end_ms")
     evidence = reply.get("evidence")
@@ -251,7 +252,7 @@ def _parse_interval(reply, calls):
             or not isinstance(evidence, str) or not evidence.strip() or len(evidence) > 500
             or not isinstance(others, list) or not others
             or any(type(n) is not int or not 1 <= n <= len(calls) or n == number for n in others)):
-        raise ValueError("Invalid voice sample bounds or cross-call evidence")
+        raise ValueError(tr("Invalid voice sample bounds or cross-call evidence"))
     call = calls[number - 1]
     return call, {
         "schema_version": "1.0",
@@ -271,7 +272,7 @@ def _parse_candidates(text, calls):
     if reply is None:
         return []
     if not isinstance(reply, list) or len(reply) > MAX_CANDIDATES:
-        raise ValueError("Expected up to three voice sample candidates")
+        raise ValueError(tr("Expected up to three voice sample candidates"))
     candidates = []
     for entry in reply:
         call, metadata = _parse_interval(entry, calls)
@@ -279,7 +280,7 @@ def _parse_candidates(text, calls):
         if any(prior["audio"] == current["audio"] and
                max(prior["start_ms"], current["start_ms"]) < min(prior["end_ms"], current["end_ms"])
                for prior in (previous["source"] for _, previous in candidates)):
-            raise ValueError("Voice sample candidates overlap")
+            raise ValueError(tr("Voice sample candidates overlap"))
         candidates.append((call, metadata))
     return candidates
 
@@ -308,7 +309,7 @@ def _request_candidates(person, calls, args):
 def _extract(call, source, clip):
     span = source["end_ms"] - source["start_ms"]
     if sha256_file(call["audio_abs"]) != source["sha256"]:
-        raise ValueError(f"Voice sample source changed during preparation: {call['audio_rel']}")
+        raise ValueError(tr("Voice sample source changed during preparation: {path}", path=call["audio_rel"]))
     result = run_capture(
         ["ffmpeg", "-y", "-v", "error", "-xerror", "-ss", f"{source['start_ms'] / 1000:.3f}",
          "-i", call["clean_abs"], "-t", f"{span / 1000:.3f}", "-map", "0:a:0",
@@ -316,10 +317,10 @@ def _extract(call, source, clip):
         capture_output=True, text=True, timeout=30,
     )
     if result.returncode:
-        raise ValueError(f"Cannot extract voice sample: {result.stderr.strip()[:300]}")
+        raise ValueError(tr("Cannot extract voice sample: {error}", error=result.stderr.strip()[:300]))
     actual, error = probe_duration_ms(str(clip))
     if error or abs(actual - span) > 100:
-        raise ValueError(f"Unexpected voice sample duration: {error or actual}")
+        raise ValueError(tr("Unexpected voice sample duration: {duration}", duration=error or actual))
 
 
 # Identify a review by the source folder relative to the archive.
@@ -336,11 +337,11 @@ def _review_sets(candidate):
         if not SAMPLE_NAME.fullmatch(name):
             continue
         if path.is_symlink():
-            raise ValueError(f"Expected local sample metadata at {path}")
+            raise ValueError(tr("Expected local sample metadata at {path}", path=path))
         metadata = json.loads(path.read_text(encoding="utf-8"))
         scope = metadata.get("scope") if isinstance(metadata, dict) else None
         if not isinstance(scope, str) or not scope:
-            raise ValueError(f"Invalid voice sample provenance at {path}")
+            raise ValueError(tr("Invalid voice sample provenance at {path}", path=path))
         reviews.setdefault(scope, {})[name] = metadata
     return reviews
 
@@ -358,7 +359,7 @@ def _review_lock(person, channel):
     directory = _sample_root().parent / ".work" / "voice_samples" / person
     lock_path = directory / f"{channel}.lock"
     if lock_path.resolve() != lock_path:
-        raise ValueError("Voice sample locks cannot use a symbolic link")
+        raise ValueError(tr("Voice sample locks cannot use a symbolic link"))
     directory.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -420,11 +421,11 @@ def prepare_voice_samples(person, source_dir, args, *, target_item=None):
 def _validate_confirmation(person, channel, clip, metadata):
     match = SAMPLE_NAME.fullmatch(clip.name)
     if not match or not clip.is_file() or clip.is_symlink():
-        raise ValueError(f"Expected a candidate FLAC at {clip}")
+        raise ValueError(tr("Expected a candidate FLAC at {path}", path=clip))
     stamp = metadata.get("recorded_on")
     if (match[1] != stamp or not _day(stamp) or metadata.get("person") != person
             or metadata.get("channel") != channel or metadata.get("sha256") != sha256_file(clip)):
-        raise ValueError(f"The selected sample or its metadata changed: {clip}")
+        raise ValueError(tr("The selected sample or its metadata changed: {path}", path=clip))
 
 
 # Publish verified provenance and clear the finished review without touching other sets.
@@ -438,7 +439,7 @@ def _finish_review(person, channel, candidate, confirmed, review, selected):
             raw = source.read_bytes()
             if os.path.lexists(destination):
                 if destination.is_symlink() or destination.read_bytes() != raw:
-                    raise ValueError(f"Conflicting sample provenance at {destination}")
+                    raise ValueError(tr("Conflicting sample provenance at {path}", path=destination))
                 continue
             staged = Path(temporary) / source.name
             staged.write_bytes(raw)
@@ -461,7 +462,7 @@ def _discard_proposal(path, metadata):
 def import_confirmed_voice_samples():
     base = _sample_root()
     if base.resolve() != base:
-        raise ValueError("Voice sample library cannot use a symbolic link")
+        raise ValueError(tr("Voice sample library cannot use a symbolic link"))
     for person in sorted(base.iterdir()) if base.is_dir() else ():
         if not PERSON_ID.fullmatch(person.name) or person.is_symlink() or not person.is_dir():
             continue
@@ -485,10 +486,10 @@ def review_voice_sample(path, *, approve):
     directory = path.parent if filename else path
     relative = directory.relative_to(_sample_root())
     if len(relative.parts) != 3 or relative.name not in {"candidate", "confirmed"} or path.resolve() != path:
-        raise ValueError("Expected a path to a voice sample candidate")
+        raise ValueError(tr("Expected a path to a voice sample candidate"))
     person, channel, status = relative.parts
     if (approve and not filename) or (not approve and status != "candidate"):
-        raise ValueError("Expected a FLAC for approval or a candidate folder or FLAC for rejection")
+        raise ValueError(tr("Expected a FLAC for approval or a candidate folder or FLAC for rejection"))
     folder = _channel_dir(person, channel)
     candidate = _review_dir(folder, "candidate")
     confirmed = _review_dir(folder, "confirmed")
@@ -496,23 +497,23 @@ def review_voice_sample(path, *, approve):
         reviews = _review_sets(candidate)
         matching = [review for review in reviews.values() if filename is None or filename in review]
         if len(matching) != 1:
-            raise ValueError("Choose a FLAC to identify one pending voice review")
+            raise ValueError(tr("Choose a FLAC to identify one pending voice review"))
         review, = matching
         selected = {name for name in review if os.path.lexists(confirmed / name)}
         if not approve:
             if selected:
-                raise ValueError("Move the selected clips back into candidate before rejecting this set")
+                raise ValueError(tr("Move the selected clips back into candidate before rejecting this set"))
             for name, metadata in review.items():
                 _discard_proposal(candidate / name, metadata)
             return None
         if status == "candidate":
             if filename in selected:
-                raise ValueError(f"Sample already exists at {confirmed / filename}")
+                raise ValueError(tr("Sample already exists at {path}", path=confirmed / filename))
             _validate_confirmation(person, channel, path, review[filename])
             confirmed.mkdir(exist_ok=True)
             path.rename(confirmed / filename)
             selected.add(filename)
         if filename not in selected:
-            raise ValueError(f"Expected the selected FLAC at {path}")
+            raise ValueError(tr("Expected the selected FLAC at {path}", path=path))
         _finish_review(person, channel, candidate, confirmed, review, selected)
         return confirmed / filename

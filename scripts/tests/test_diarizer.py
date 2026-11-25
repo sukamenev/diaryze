@@ -154,8 +154,8 @@ class PipelineTests(TemporaryArchive):
         self.assertLess(prompt.index(str(reference)), prompt.index("ITEM 2:"))
         self.assertEqual((stats.done, stats.audio_ms, stats.tok_in, stats.tok_out), (2, 10000, 10, 5))
         self.assertEqual(len(output.getvalue().splitlines()), 6)
-        self.assertIn("Готово 1", output.getvalue())
-        self.assertIn("Готово 2", output.getvalue())
+        self.assertIn("Done 1", output.getvalue())
+        self.assertIn("Done 2", output.getvalue())
         self.assertNotIn("\x1b", output.getvalue())
         for item, expected_sample in zip(items, ("ivanov_ivan/phone/confirmed/2025-03-14_01.flac", "none"), strict=True):
             md = Path(item["target_md"]).read_text()
@@ -279,7 +279,7 @@ class PipelineTests(TemporaryArchive):
         self.assertEqual(len(lines[header:]), 3)
         self.assertTrue(all(line.startswith('[WARN]') for line in lines[:header]))
         self.assertIn("WARN", lines[header])
-        self.assertIn("Готово 1", output.getvalue())
+        self.assertIn("Done 1", output.getvalue())
 
     # Check session continuity and absolute timestamps across parts of a long recording.
     def test_long_recording_keeps_session_and_absolute_timestamps(self):
@@ -641,6 +641,24 @@ class AudioTests(TemporaryArchive):
 
 
 class RuntimeTests(unittest.TestCase):
+    # Verify translated help and parse errors, including language selection after --help.
+    def test_cli_interface_languages(self):
+        for flags, expected in ((["--help", "--ui=ru"], "Язык интерфейса"),
+                                (["--help"], "Interface language"),
+                                (["--ui", "en", "--help"], "Interface language")):
+            with self.subTest(flags=flags), mock.patch("sys.argv", ["diarize.py", *flags]), \
+                    contextlib.redirect_stdout(io.StringIO()) as output, self.assertRaises(SystemExit) as result:
+                cli.main()
+            self.assertEqual(result.exception.code, 0)
+            self.assertIn(expected, output.getvalue())
+        for flags, expected in ((["--ui", "ru", "--workers", "bad"], "недопустимое значение"),
+                                (["--ui", "other"], "invalid choice")):
+            with self.subTest(flags=flags), mock.patch("sys.argv", ["diarize.py", *flags]), \
+                    contextlib.redirect_stderr(io.StringIO()) as output, self.assertRaises(SystemExit) as result:
+                cli.main()
+            self.assertEqual(result.exception.code, 2)
+            self.assertIn(expected, output.getvalue())
+
     # Check that the default archive scope and both folder option names behave consistently.
     def test_cli_default_and_folder_aliases(self):
         cwd = Path.cwd()
@@ -762,7 +780,7 @@ class RuntimeTests(unittest.TestCase):
                     with self.assertRaises(InterruptedError):
                         quota.wait_for_quota_reset("Resets in 2h11m10s")
                 self.assertEqual(clock.value, expected)
-                self.assertIn("Жду 7890с (до ", output.getvalue())
+                self.assertIn("Waiting 7890s (until ", output.getvalue())
 
     # Check subprocess envelope handling using a fake agent reply.
     def test_agy_subprocess_envelope_without_starting_agy(self):

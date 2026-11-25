@@ -5,6 +5,8 @@ import os
 import signal
 import threading
 
+from .ui import tr
+
 
 STOP_EVENT = threading.Event()
 
@@ -25,6 +27,9 @@ def stop_signals():
     STOP_EVENT.clear()
     FORCE_STOP_EVENT.clear()
     CONSOLE_INTERRUPTED.clear()
+    force = tr("[FORCE STOP] Cancelling active processes and restoring the terminal...")
+    drain = tr("[STOP] Finishing active jobs (press Ctrl+C again to cancel immediately)...")
+    force, drain = (f"\n{message}\n".encode("utf-8") for message in (force, drain))
 
     # Escalate a repeated interrupt or termination signal to a forced stop.
     def handle_stop(signum, frame):
@@ -33,14 +38,14 @@ def stop_signals():
                 return
             STOP_EVENT.set()
             FORCE_STOP_EVENT.set()
-            message = "\n[FORCE STOP] Прерываю активные процессы и восстанавливаю терминал...\n"
+            message = force
         else:
             STOP_EVENT.set()
-            message = "\n[STOP] Завершаю текущие задачи (повторный Ctrl+C — прервать сразу)...\n"
+            message = drain
         # Taking PRINT_LOCK or using buffered print from a signal handler can deadlock.
         CONSOLE_INTERRUPTED.set()
         try:
-            os.write(2, message.encode("utf-8"))
+            os.write(2, message)
         except OSError:
             pass
 

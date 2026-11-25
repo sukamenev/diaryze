@@ -17,13 +17,14 @@ from .config import (
     REFUSAL_TEXT_PAT, SAFETY_ERR_PAT, TZ,
 )
 from .models import ModelAttempts, ModelCooldowns
-from .errors import MediaInputError, ModelRefused, ModelsUnavailable, ModelTaskFailed, classify_error, normalize_error
+from .errors import MediaInputError, ModelRefused, ModelsUnavailable, ModelTaskFailed, classify_error, normalize_error, ui_error
 from .prompts import build_batch_prompt, build_part_prompt
 from .runtime import FORCE_STOP_EVENT, STOP_EVENT
 from .console import completed, emit
 from .diagnostics import record
 from .catalog_fields import response_summary
 from .prompt_files import load_prompt
+from .ui import tr
 from .voice_samples import owner_reference, voice_sample_value
 from .transcript import (
     format_ts,
@@ -119,7 +120,7 @@ class Stats:
             else:
                 delay = 0
         if delay:
-            emit(f'[WARN] Сбой сервиса: пауза перед новыми запросами {delay} с', flush=True)
+            emit(tr("[WARN] Service failure; pausing new requests for {seconds} s", seconds=delay), flush=True)
 
     # Wait interruptibly for the shared backend pause to expire.
     def wait_backend(self):
@@ -184,7 +185,8 @@ def _retry_items_individually(items: list[dict], reason: str, args, people: dict
             raise
         except Exception as e2:
             stats.fail([it], e2, stage='individual_retry', model=args.model)
-            emit(f"[ERR] {it['audio_rel']}: {reason} -> retry failed: {e2}", file=sys.stderr, flush=True)
+            emit(tr("[ERR] {path}: {reason} -> retry failed: {error}", path=it["audio_rel"],
+                    reason=reason, error=ui_error(e2)), file=sys.stderr, flush=True)
 
 
 # Call the provider and normalize failures, usage, and session information.
@@ -367,8 +369,8 @@ def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) 
             checkpoint.drop_from(part['part'])
             break
     if restored:
-        emit(f"Продолжение {item['audio_rel']}: сохранены части 1–{len(restored)} "
-             f"из {len(item['parts'])}", flush=True)
+        emit(tr("Resuming {path}: saved parts 1–{saved} of {total}", path=item["audio_rel"],
+                saved=len(restored), total=len(item["parts"])), flush=True)
         record('checkpoint_resumed', items=[item], parts=len(restored))
     reference = None
     if not without_samples and len(restored) < len(item['parts']):
@@ -447,7 +449,8 @@ def process_short_batch(items: list[dict], args, people: dict, orgs: dict, stats
                     stats.models.failed(model, err, items=items, scope=scope)
                     agy_forget(home, conv_id)
                     conv_id = None
-                    emit(f"[WARN] {scope}: отказ по содержимому на {model}; разбиваю по одному файлу")
+                    emit(tr("[WARN] {scope}: content refusal on {model}; retrying one file at a time",
+                            scope=scope, model=model))
                     _retry_items_individually(items, 'content refusal', args, people, orgs, stats)
                     return
                 agy_forget(home, conv_id)
@@ -518,7 +521,7 @@ def process_short_batch(items: list[dict], args, people: dict, orgs: dict, stats
     except MediaInputError:
         if len(items) == 1:
             raise
-        emit(f"[WARN] {scope}: повреждённые медиаданные; проверяю файлы по одному")
+        emit(tr("[WARN] {scope}: damaged media; retrying one file at a time", scope=scope))
         _retry_items_individually(items, 'media input rejected', args, people, orgs, stats)
     finally:
         agy_forget(home, conv_id)
@@ -544,7 +547,7 @@ def run_job(job_cands: list[dict], args, stats: Stats):
                 if FORCE_STOP_EVENT.is_set():
                     return
                 stats.fail([cand], exc, stage='audio_preparation')
-                emit(f"[ERR] {cand['audio_rel']}: {exc}", file=sys.stderr, flush=True)
+                emit(f"[ERR] {cand['audio_rel']}: {ui_error(exc)}", file=sys.stderr, flush=True)
                 continue
             if err:
                 # A cancelled ffmpeg must not permanently mark its input as broken.
@@ -579,7 +582,7 @@ def run_job(job_cands: list[dict], args, stats: Stats):
                     STOP_EVENT.set()
                     return
                 stats.fail([litem], e, stage='long_recording', model=args.model)
-                emit(f"[ERR] {litem['audio_rel']}: {e}", file=sys.stderr, flush=True)
+                emit(f"[ERR] {litem['audio_rel']}: {ui_error(e)}", file=sys.stderr, flush=True)
         if shorts and not FORCE_STOP_EVENT.is_set():
             try:
                 process_short_batch(shorts, args, people, orgs, stats)
@@ -601,7 +604,7 @@ def run_job(job_cands: list[dict], args, stats: Stats):
                     STOP_EVENT.set()
                     return
                 stats.fail(shorts, e, stage='short_batch', model=args.model)
-                emit(f"[ERR] batch({len(shorts)}): {e}", file=sys.stderr, flush=True)
+                emit(f"[ERR] batch({len(shorts)}): {ui_error(e)}", file=sys.stderr, flush=True)
 
 
 # Take one standalone recording or a bounded group of short files from the queue.
