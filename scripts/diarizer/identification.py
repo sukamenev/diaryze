@@ -61,7 +61,7 @@ def split_markdown(raw):
     lines = raw.splitlines(keepends=True)
     if not lines or lines[0].strip() != b"---":
         raise ValueError("Markdown has no YAML front matter")
-    end = next((i for i in range(1, len(lines)) if lines[i].strip() == b"---"), None)
+    end = next((i for i in range(1, len(lines)) if lines[i].rstrip(b" \t\r\n") == b"---"), None)
     if end is None:
         raise ValueError("Unclosed YAML front matter")
     meta = yaml.safe_load(b"".join(lines[1:end]).decode("utf-8"))

@@ -69,7 +69,9 @@ diaryze links speakers using filenames, phone numbers, catalog matches, and spee
 
 On the first run for phone folders without a known owner's sample, diaryze asks the model to compare short calls with different contacts and cut up to three candidate clips per `.owner` folder. It stops before transcription and prints the files under `work/voice_samples/` for listening.
 
-Select the best clip with `diaryze --approve-voice-sample "path/to/02.flac"`. Approval stores the chosen FLAC and its provenance JSON in `Data/voice_samples/` and clears that review set. Use `--reject-voice-sample "path/to/candidates"` to discard a set. `--prepare-voice-sample PERSON` requests a new review set separately. The next transcription run uses the owner's closest dated reference in either direction. A phone clip wins ties. If the call date is unavailable, the most recent dated reference is used.
+Listen to the files in `review/candidates/` and move at least one selected FLAC to the adjacent `review/confirmed/` folder. Keep `review.json` beside the two folders. On the next run, diaryze verifies the selected clips, stores them and their provenance in `Data/voice_samples/`, and clears the completed review set. It then uses the owner's closest dated reference in either direction. A phone clip wins ties. If the call date is unavailable, the most recent dated reference is used.
+
+`--prepare-voice-sample PERSON` requests a fresh review set. `--approve-voice-sample "path/to/02.flac"` confirms a clip from the terminal. `--reject-voice-sample "path/to/candidates"` discards the set.
 
 `--skip-voice-sample-preflight` starts transcription immediately, using approved references where available. The approved audio files can also be placed manually in the named folders.
 

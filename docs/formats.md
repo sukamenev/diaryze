@@ -82,6 +82,24 @@ speakers:
 - `reviewed_at` — дата полной человеческой проверки; краткое индексируемое содержание
   находится в YAML `summary`, а реплики идут сразу после `---` (без заголовков `## Речь`,
   `## Кратко`, `## Заметки`).
+- `scratch` — необязательная служебная таблица в YAML-шапке. Каждый скрипт хранит значение под
+  своим именем. Значения могут быть объектами, списками, строками, числами, логическими
+  значениями или `null`. Поле предназначено для промежуточных результатов обработки.
+
+Python-скрипты могут работать с расшифровкой через `TranscriptFile`.
+
+```python
+from diarizer.markdown import TranscriptFile
+
+transcript = TranscriptFile("Text/Phone/2025/example.m4a.md")
+metadata, utterances = transcript.read()
+transcript.set_scratch("speaker_check", {"status": "suspected_swap", "at": ["00:00:24.10"]})
+result = transcript.get_scratch("speaker_check")
+transcript.clear_scratch("speaker_check")
+```
+
+`read_metadata()` возвращает только YAML-шапку. `set_scratch()` и `clear_scratch()`
+атомарно меняют запись одного скрипта и сохраняют дату изменения файла и текст реплик.
 
 ## Идентификация участников
 

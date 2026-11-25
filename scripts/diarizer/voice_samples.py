@@ -299,12 +299,14 @@ def _review_folder(person, source_dir):
     return folder
 
 
-# List the available clips awaiting a decision in the current review folder.
+# List unselected clips from a current review or an earlier layout.
 def pending_voice_samples(person, source_dir):
-    pending = _review_folder(person, source_dir) / "candidates"
-    if pending.is_symlink():
+    folder = _review_folder(person, source_dir)
+    review = folder / "review"
+    pending = (review if review.exists() else folder) / "candidates"
+    if pending.resolve() != pending:
         raise ValueError("Voice sample review cannot use a symbolic link")
-    return sorted(path for path in pending.glob("[0-9][0-9].flac")
+    return sorted(path for path in pending.glob("0[1-3].flac")
                   if path.is_file() and not path.is_symlink())
 
 
@@ -317,14 +319,16 @@ def _review_lock(folder):
         yield
 
 
-# Stage a review set independently of the source recordings.
+# Stage the two review folders and shared provenance as one atomic set.
 def prepare_voice_samples(person, source_dir, args, *, target_item=None):
     folder = _review_folder(person, source_dir)
     with _review_lock(_review_folder(person, config.ROOT)):
         if existing := pending_voice_samples(person, source_dir):
             return existing
+        review = folder / "review"
+        if review.is_dir():
+            return []
         folder.mkdir(parents=True, exist_ok=True)
-        pending = folder / "candidates"
         with (tempfile.TemporaryDirectory(prefix="diaryze-voice-inputs-") as inputs,
               tempfile.TemporaryDirectory(dir=folder, prefix=".prepare-") as temporary):
             target_day = _recording_day(target_item) if target_item is not None else None
@@ -334,62 +338,124 @@ def prepare_voice_samples(person, source_dir, args, *, target_item=None):
             candidates = _request_candidates(person, calls, args)
             if not candidates or STOP_EVENT.is_set():
                 return []
-            staged = Path(temporary) / "candidates"
-            staged.mkdir()
+            staged = Path(temporary) / "review"
+            (staged / "candidates").mkdir(parents=True)
+            (staged / "confirmed").mkdir()
+            clips = {}
             for number, (call, metadata) in enumerate(candidates, 1):
-                clip = staged / f"{number:02}.flac"
+                clip = staged / "candidates" / f"{number:02}.flac"
                 _extract(call, metadata["source"], clip)
                 metadata.update(person=person, channel="phone", model=args.model, sha256=sha256_file(clip))
-                clip.with_suffix(".json").write_text(
-                    json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
-                )
-            staged.rename(pending)
+                clips[clip.name] = metadata
+            (staged / "review.json").write_text(
+                json.dumps({"schema_version": "1.0", "clips": clips}, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            staged.rename(review)
         return pending_voice_samples(person, source_dir)
 
 
-# Approve the chosen clip or discard a complete pending review set.
-def review_voice_sample(path, *, approve):
+# Resolve a review path inside archive work data and obtain its owner ID.
+def _review_person(path):
     base = Path(config.ROOT).resolve() / "work" / "voice_samples"
+    if path.resolve() != path or not path.is_relative_to(base) or len(path.relative_to(base).parts) < 2:
+        raise ValueError("Expected a path to a pending voice sample set")
+    person = path.relative_to(base).parts[0]
+    _sample_dir(person)
+    return person
+
+
+# Validate the selected file and its link to the original model proposal.
+def _validate_confirmation(person, clip, metadata):
+    if not re.fullmatch(r"0[1-3]\.flac", clip.name) or not clip.is_file() or clip.is_symlink():
+        raise ValueError(f"Expected a candidate FLAC at {clip}")
+    stamp = metadata.get("recorded_on") if isinstance(metadata, dict) else None
+    day = _day(stamp)
+    if (not day or day.isoformat() != stamp or metadata.get("person") != person
+            or metadata.get("channel") != "phone" or metadata.get("sha256") != sha256_file(clip)):
+        raise ValueError(f"The selected sample or its metadata changed: {clip}")
+
+
+# Install one validated reference or reuse an identical clip from a retried import.
+def _save_confirmed_sample(person, clip, metadata):
+    destination = _sample_dir(person) / "phone"
+    if destination.resolve() != destination:
+        raise ValueError("Voice sample destination must be inside the archive data")
+    destination.mkdir(parents=True, exist_ok=True)
+    stamp = metadata["recorded_on"]
+    sequence = 1
+    while (path := destination / f"{stamp}_{sequence:02}.flac").exists() or path.is_symlink():
+        if path.is_file() and not path.is_symlink() and sha256_file(path) == metadata["sha256"]:
+            return path
+        sequence += 1
+    with tempfile.TemporaryDirectory(dir=destination, prefix=".approve-") as temporary:
+        staged_clip = Path(temporary) / clip.name
+        staged_json = staged_clip.with_suffix(".json")
+        shutil.copyfile(clip, staged_clip)
+        if sha256_file(staged_clip) != metadata["sha256"]:
+            raise ValueError(f"The selected sample changed during import: {clip}")
+        staged_json.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        staged_json.replace(path.with_suffix(".json"))
+        staged_clip.replace(path)
+    return path
+
+
+# Verify selections together before publishing any clip and clearing the review set.
+def _finish_review(person, review, selected, *, legacy=False):
+    if legacy:
+        clip, = selected
+        provenance = clip.with_suffix(".json")
+        if provenance.is_symlink():
+            raise ValueError(f"Expected local sample metadata at {provenance}")
+        clips = {clip.name: json.loads(provenance.read_text(encoding="utf-8"))}
+    else:
+        provenance = review / "review.json"
+        if provenance.is_symlink():
+            raise ValueError(f"Expected local review metadata at {provenance}")
+        document = json.loads(provenance.read_text(encoding="utf-8"))
+        clips = document.get("clips") if isinstance(document, dict) else None
+        if not isinstance(clips, dict):
+            raise ValueError(f"Invalid review metadata in {provenance}")
+    for clip in selected:
+        _validate_confirmation(person, clip, clips.get(clip.name))
+    paths = [_save_confirmed_sample(person, clip, clips[clip.name]) for clip in selected]
+    shutil.rmtree(review)
+    return paths
+
+
+# Import completed selections before opening the queue, including standalone review sets.
+def import_confirmed_voice_samples():
+    base = Path(config.ROOT).resolve() / "work" / "voice_samples"
+    for confirmed in sorted(base.rglob("review/confirmed")):
+        if (not confirmed.is_dir() or confirmed.parent.parent.name.startswith(".prepare-")
+                or not any(confirmed.glob("*.flac"))):
+            continue
+        person = _review_person(confirmed)
+        with _review_lock(_review_folder(person, config.ROOT)):
+            selected = sorted(confirmed.glob("*.flac"))
+            if selected:
+                yield from _finish_review(person, confirmed.parent, selected)
+
+
+# Keep the standalone CLI actions available for both review layouts.
+def review_voice_sample(path, *, approve):
     path = Path(config.ROOT).resolve() / path
     pending = path.parent if approve else path
-    if (pending.name != "candidates" or pending.resolve() != pending
-            or not pending.is_relative_to(base) or len(pending.relative_to(base).parts) < 2):
+    if pending.name != "candidates":
         raise ValueError("Expected a path to a pending voice sample set")
-    person = pending.relative_to(base).parts[0]
-    _sample_dir(person)
+    person = _review_person(pending)
     with _review_lock(_review_folder(person, config.ROOT)):
         if not pending.is_dir():
             raise ValueError(f"No pending voice samples at {pending}")
+        review = pending.parent
+        legacy = review.name != "review" or not (review / "review.json").is_file()
+        if legacy:
+            review = pending
         if not approve:
-            shutil.rmtree(pending)
+            shutil.rmtree(review)
             return None
-        clip = path
-        provenance = clip.with_suffix(".json")
-        if (not re.fullmatch(r"0[1-3]\.flac", clip.name)
-                or not clip.is_file() or clip.is_symlink() or provenance.is_symlink()):
-            raise ValueError("Expected an independent sample and its metadata")
-        metadata = json.loads(provenance.read_text(encoding="utf-8"))
-        stamp = metadata.get("recorded_on")
-        if (not isinstance(metadata, dict) or metadata.get("person") != person or metadata.get("channel") != "phone"
-                or not _day(stamp) or _day(stamp).isoformat() != stamp
-                or metadata.get("sha256") != sha256_file(clip)):
-            raise ValueError("The pending sample or its metadata changed")
-        destination = _sample_dir(person) / "phone"
-        if destination.resolve() != destination:
-            raise ValueError("Voice sample destination must be inside the archive data")
-        destination.mkdir(parents=True, exist_ok=True)
-        sequence = 1
-        while (path := destination / f"{stamp}_{sequence:02}.flac").exists() or path.is_symlink():
-            if not path.is_symlink() and sha256_file(path) == metadata["sha256"]:
-                break
-            sequence += 1
-        if not path.exists():
-            with tempfile.TemporaryDirectory(dir=destination, prefix=".approve-") as temporary:
-                staged_clip = Path(temporary) / clip.name
-                staged_json = Path(temporary) / provenance.name
-                shutil.copyfile(clip, staged_clip)
-                shutil.copyfile(provenance, staged_json)
-                staged_json.replace(path.with_suffix(".json"))
-                staged_clip.replace(path)
-        shutil.rmtree(pending)
-        return path
+        confirmed = review / "confirmed"
+        if not legacy and confirmed.resolve() != confirmed:
+            raise ValueError("Voice sample review cannot use a symbolic link")
+        selected = [path, *sorted(confirmed.glob("*.flac"))] if not legacy else [path]
+        return _finish_review(person, review, selected, legacy=legacy)[0]

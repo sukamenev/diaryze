@@ -11,11 +11,11 @@ import yaml
 
 if __package__:
     from .diarizer.config import ROOT, TS_LINE_RE
-    from .diarizer.identification import split_markdown
+    from .diarizer.markdown import TranscriptFile
     from .diarizer.owners import find_folder_owner
 else:
     from diarizer.config import ROOT, TS_LINE_RE
-    from diarizer.identification import split_markdown
+    from diarizer.markdown import TranscriptFile
     from diarizer.owners import find_folder_owner
 
 
@@ -128,11 +128,9 @@ def search_transcripts(
         if path.is_symlink() or not path.resolve().is_relative_to(text_root):
             continue
         try:
-            raw = path.read_bytes()
-            lines_b, end, meta = split_markdown(raw)
+            meta, body = TranscriptFile(path).read()
         except (OSError, ValueError, yaml.YAMLError):
             continue
-        body = b"".join(lines_b[end + 1:]).decode("utf-8", errors="replace")
 
         dur = meta.get("duration_s")
         if min_sec is not None and (dur is None or float(dur) < min_sec):

@@ -2,19 +2,19 @@
 """Swap two transcript speaker labels while preserving the rest of the Markdown."""
 
 import argparse
-import os
 from pathlib import Path
 import stat
-import tempfile
 
 import yaml
 
 if __package__:
     from .diarizer.config import TS_LINE_RE
     from .diarizer.identification import split_markdown
+    from .diarizer.markdown import replace_markdown
 else:
     from diarizer.config import TS_LINE_RE
     from diarizer.identification import split_markdown
+    from diarizer.markdown import replace_markdown
 
 
 # Exchange two speaker keys throughout the transcript, keeping metadata coherent.
@@ -50,30 +50,6 @@ def swap_speakers(raw, first, second):
         if count == 0:
             raise ValueError(f"Speaker {speaker!r} has no timestamped turns")
     return b"".join(lines), counts
-
-
-# Write the corrected Markdown atomically and preserve file metadata.
-def replace_markdown(path, before, raw, changed):
-    temp = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".swap-speakers-",
-                                         suffix=".tmp", delete=False) as file:
-            temp = Path(file.name)
-            file.write(changed)
-            file.flush()
-            os.fsync(file.fileno())
-        temp.chmod(stat.S_IMODE(before.st_mode))
-        os.utime(temp, ns=(before.st_atime_ns, before.st_mtime_ns))
-        if path.read_bytes() != raw:
-            raise ValueError("Markdown changed since it was read")
-        current = path.lstat()
-        if (not os.path.samestat(current, before) or current.st_ctime_ns != before.st_ctime_ns
-                or current.st_mtime_ns != before.st_mtime_ns):
-            raise ValueError("Markdown changed since it was read")
-        os.replace(temp, path)
-    finally:
-        if temp is not None:
-            temp.unlink(missing_ok=True)
 
 
 # Preview or apply a speaker swap for a selected Markdown file.

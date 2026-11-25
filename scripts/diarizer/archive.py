@@ -519,14 +519,17 @@ def register_catalog_entries(speakers: dict, item: dict, people: dict, orgs: dic
 def md_has_matching_sha(md_path: str, audio_sha: str) -> bool:
     try:
         with open(md_path, encoding="utf-8") as f:
-            head = f.read(4096)
-        parts = head.split("---", 2)
-        if len(parts) < 2:
-            return False
-        meta = yaml.safe_load(parts[1]) or {}
-        return isinstance(meta, dict) and meta.get("sha256") == audio_sha
-    except Exception:
+            if f.readline().strip() != "---":
+                return False
+            header = []
+            for line in f:
+                if line.rstrip(" \t\r\n") == "---":
+                    meta = yaml.safe_load("".join(header))
+                    return isinstance(meta, dict) and meta.get("sha256") == audio_sha
+                header.append(line)
+    except (OSError, yaml.YAMLError, ValueError):
         return False
+    return False
 
 
 # Find recordings whose transcripts or terminal statuses are still outstanding.

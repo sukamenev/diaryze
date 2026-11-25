@@ -28,7 +28,8 @@ from .terminal import preserve_terminal
 from .diagnostics import record, run_log
 from .errors import ModelsUnavailable, classify_error
 from .voice_samples import (
-    has_approved_sample, pending_voice_samples, phone_owner, prepare_voice_samples, review_voice_sample,
+    has_approved_sample, import_confirmed_voice_samples, pending_voice_samples, phone_owner, prepare_voice_samples,
+    review_voice_sample,
 )
 
 
@@ -149,10 +150,14 @@ def _run_voice_sample_action(args, source_dir):
     return 0
 
 
-# Print paths to the listening files and show how to approve the chosen one.
+# Print the clips and the destination for the selected files.
 def _show_voice_candidates(samples):
     emit("Кандидаты на голосовой образец:\n" + "\n".join(str(path) for path in samples), flush=True)
-    emit('Прослушайте их и выберите один через --approve-voice-sample "путь_к_файлу.flac".')
+    confirmed = samples[0].parent.parent / "confirmed"
+    if confirmed.is_dir():
+        emit(f"Переместите один или несколько выбранных FLAC в {confirmed} и запустите скрипт снова.")
+    else:
+        emit('Для этого набора выберите файл через --approve-voice-sample "путь_к_файлу.flac".')
 
 
 # Stage samples per phone owner folder and reserve transcription for the next run.
@@ -221,6 +226,10 @@ def _run(args):
 
 # Scan the pending queue, coordinate workers, and report final totals.
 def run_workers(args):
+    if not args.dry_run:
+        for sample in import_confirmed_voice_samples():
+            record('voice_sample_confirmed', path=str(sample))
+            emit(f"Образец подтверждён: {sample}", flush=True)
     cands = scan_pending(args.subdir, retry_skipped=args.retry_skipped, retry_refused=args.retry_refused,
                          retry_recovery=getattr(args, "retry_recovery", False))
     if args.limit > 0:
