@@ -10,10 +10,10 @@ import os
 from pathlib import Path
 
 if __package__:
-    from .diarizer.archive import is_audio_candidate, is_excluded_dir
+    from .diarizer.archive import is_audio_candidate, is_excluded_source_dir
     from .diarizer.config import EXCLUDED_FILES, ROOT, data_path
 else:
-    from diarizer.archive import is_audio_candidate, is_excluded_dir
+    from diarizer.archive import is_audio_candidate, is_excluded_source_dir
     from diarizer.config import EXCLUDED_FILES, ROOT, data_path
 
 
@@ -41,10 +41,10 @@ def audit(root):
     inventory = {}
     failures = []
     for base, dirs, files in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if not is_excluded_dir(d)
-                         and not (Path(base) / d).is_symlink())
+        folder = Path(base)
+        dirs[:] = sorted(d for d in dirs if not is_excluded_source_dir(folder / d))
         for name in sorted(files):
-            path = Path(base) / name
+            path = folder / name
             if name.lower() in EXCLUDED_FILES or path.is_symlink() or not path.is_file():
                 continue
             if not is_audio_candidate(str(path)):

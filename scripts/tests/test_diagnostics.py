@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-from scripts.diarizer import cli, diagnostics, pipeline, runtime
+from scripts.diarizer import cli, config, diagnostics, pipeline, runtime
 
 
 class DiagnosticsTests(unittest.TestCase):
@@ -73,7 +73,7 @@ class DiagnosticsTests(unittest.TestCase):
             # Record a failure for the mocked job.
             def error(job, args, stats):
                 stats.fail(job, 'invalid response', stage='test')
-            with mock.patch.object(cli, 'scan_pending', return_value=[item]), \
+            with config.use_archive(tmp), mock.patch.object(cli, 'scan_pending', return_value=[item]), \
                     mock.patch.object(cli, 'pack_next_job', side_effect=pack), \
                     mock.patch.object(cli, 'run_job', side_effect=error) as run, \
                     contextlib.redirect_stdout(io.StringIO()):
@@ -86,7 +86,7 @@ class DiagnosticsTests(unittest.TestCase):
     def test_worker_exception_reaches_caller(self):
         with tempfile.TemporaryDirectory() as tmp:
             item, args = self.worker_fixture(tmp)
-            with mock.patch.object(cli, 'scan_pending', return_value=[item]), \
+            with config.use_archive(tmp), mock.patch.object(cli, 'scan_pending', return_value=[item]), \
                     mock.patch.object(cli, 'pack_next_job', side_effect=ValueError('probe exploded')), \
                     contextlib.redirect_stdout(io.StringIO()), \
                     self.assertRaisesRegex(ValueError, 'probe exploded'):

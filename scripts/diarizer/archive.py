@@ -4,6 +4,7 @@ from datetime import datetime
 import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import threading
 import yaml
@@ -186,8 +187,12 @@ def resolve_source_dir(folder):
     path = os.path.realpath(os.path.join(root, os.path.expanduser(folder)))
     if os.path.commonpath([root, path]) != root:
         raise ValueError(tr("Folder must be inside {root}", root=config.ROOT))
-    rel = os.path.relpath(path, root)
-    if any(is_excluded_dir(part) for part in rel.split(os.sep)):
+    root_path, source = Path(root), Path(path)
+    if _is_diaryze_checkout(root_path) or any(
+        is_excluded_source_dir(directory)
+        for directory in (source, *source.parents)
+        if directory != root_path and directory.is_relative_to(root_path)
+    ):
         raise ValueError(tr("Service folder is excluded from scanning: {folder}", folder=folder))
     if not os.path.isdir(path):
         raise ValueError(tr("Folder not found: {folder}", folder=folder))
@@ -224,6 +229,18 @@ def sha256_file(path: str) -> str:
 def is_excluded_dir(name: str) -> bool:
     low = name.lower()
     return low in EXCLUDED_DIRS or "trash" in low or "корзин" in low
+
+
+# Recognize the Diaryze source tree independently of the checkout directory name.
+def _is_diaryze_checkout(path: Path) -> bool:
+    return ((path / "pyproject.toml").is_file()
+            and (path / "scripts" / "diarize.py").is_file()
+            and (path / "scripts" / "diarizer" / "cli.py").is_file())
+
+
+# Keep symlinks, service directories, and Diaryze source trees out of audio scans.
+def is_excluded_source_dir(path: Path) -> bool:
+    return is_excluded_dir(path.name) or path.is_symlink() or _is_diaryze_checkout(path)
 
 
 # Locate persistent archive data and support older archives that stored it in docs.
@@ -545,8 +562,8 @@ def scan_pending(subdir: str = ".", retry_skipped: bool = False, retry_refused: 
     mstate = load_manifest_state()
     cands = []
     for dirpath, dirnames, filenames in os.walk(src_root):
-        dirnames[:] = [d for d in dirnames if not is_excluded_dir(d)
-                      and not os.path.islink(os.path.join(dirpath, d))]
+        base = Path(dirpath)
+        dirnames[:] = [d for d in dirnames if not is_excluded_source_dir(base / d)]
         for fn in filenames:
             if fn.lower() in EXCLUDED_FILES:
                 continue

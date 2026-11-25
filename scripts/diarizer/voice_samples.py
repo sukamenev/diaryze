@@ -12,7 +12,7 @@ import tempfile
 
 from . import config
 from .agy import agy_forget, extract_envelope_error_and_usage, run_agy
-from .archive import is_audio_candidate, is_excluded_dir, parse_filename, sha256_file
+from .archive import is_audio_candidate, is_excluded_source_dir, parse_filename, sha256_file
 from .audio import prepare_audio_work, probe_duration_ms
 from .owners import find_folder_owner
 from .processes import run_capture
@@ -174,8 +174,7 @@ def _source_calls(person, source_dir, target_day):
     candidates = []
     for directory, folders, files in os.walk(source_dir):
         base = Path(directory)
-        folders[:] = [name for name in folders
-                      if not is_excluded_dir(name) and not (base / name).is_symlink()]
+        folders[:] = [name for name in folders if not is_excluded_source_dir(base / name)]
         rel_dir = base.relative_to(root)
         owner, owner_file = find_folder_owner(str(rel_dir / "_"))
         if not owner or owner.get("type") != "phone" or owner.get("owner") != person:

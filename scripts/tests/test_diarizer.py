@@ -77,6 +77,24 @@ class ArchiveTests(TemporaryArchive):
         scoped = archive.scan_pending(str(self.root / "Recordings"))
         self.assertEqual({x["audio_rel"] for x in scoped}, {"Recordings/mono.mp3", "Recordings/sound.blob"})
 
+    # Ignore embedded checkouts by their source files and allow ordinary folders with the project name.
+    def test_skips_a_checkout_with_any_name(self):
+        checkout = self.root / "tools checkout"
+        for name in ("pyproject.toml", "scripts/diarize.py", "scripts/diarizer/cli.py", "LICENSE", "fixtures/test.wav"):
+            path = checkout / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"fixture")
+        recordings = self.root / "diaryze"
+        recordings.mkdir()
+        (recordings / "call.wav").write_bytes(b"audio fixture")
+
+        self.assertEqual([item["audio_rel"] for item in archive.scan_pending()], ["diaryze/call.wav"])
+        for folder in (checkout, checkout / "fixtures"):
+            with self.subTest(folder=folder), self.assertRaisesRegex(ValueError, "Service folder"):
+                archive.resolve_source_dir(str(folder))
+        with config.use_archive(checkout), self.assertRaisesRegex(ValueError, "Service folder"):
+            archive.resolve_source_dir(".")
+
     # Check that an explicit source folder cannot escape the archive or name a service path.
     def test_source_folder_rejects_service_directories_and_escape(self):
         for name in ("Text", "docs", "scripts"):

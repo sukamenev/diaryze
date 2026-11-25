@@ -9,18 +9,19 @@ Turn phone calls and voice recordings into searchable Markdown, one file per rec
 Requires Linux or macOS, Python 3.11+, and [FFmpeg](https://ffmpeg.org/download.html) (`ffmpeg` and `ffprobe` on `PATH`). On macOS, run `brew install ffmpeg`. Install [Google Antigravity CLI](https://antigravity.google/docs/getting-started) and run `agy` to sign in to an account with access to your models. PyYAML is installed with the package. [Optional recovery tools](#audio-recovery)
 
 ```bash
+cd "/path/to/recordings"
 git clone https://github.com/sukamenev/diaryze.git
-cd diaryze
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install .
+python3 -m venv diaryze/.venv
+source diaryze/.venv/bin/activate
+python -m pip install ./diaryze
+diaryze --dry-run
 ```
 
-Start with a dry run and a few recordings.
+Git names the checkout `diaryze` by default. You can pass a different destination name to `git clone` and use it in the paths above. Keep `Data/` for archive data. Diaryze skips the checkout when it looks for recordings.
+
+From the archive root, try processing a few recordings.
 
 ```bash
-cd "/path/to/recordings"
-diaryze --dry-run
 diaryze --workers 2 --limit 5
 ```
 
@@ -28,7 +29,7 @@ diaryze uses the current directory as the archive root by default. Use `diaryze 
 
 The command-line interface is in English by default. Use `--ui ru` for Russian help, progress and prompts, or `--ui en` to select English explicitly. Transcript language and summary rules are independent of the interface.
 
-You can put a symlink named `diaryze` in the archive pointing at your existing checkout. From the archive root, run:
+If you have a checkout elsewhere, you can put a symlink named `diaryze` in the archive. With PyYAML installed, the direct script command works from the archive root:
 
 ```bash
 python3 diaryze/scripts/diarize.py --folder Phone/2025 --dry-run
@@ -48,7 +49,7 @@ In the author's runs, **5 hours of Antigravity quota covered roughly 18–26 hou
 - `Data/.work/checkpoints/` holds accepted long-recording parts until the final transcript is published.
 - `Data/reports/` holds archive-specific reports and benchmark results.
 
-Keep the checkout separate so the archive can move with its transcripts and catalogs. Originals stay in place. `agy` sends the audio and transcription context to the model provider.
+Originals stay in place. `agy` sends the audio and transcription context to the model provider.
 
 ## Identify speakers
 

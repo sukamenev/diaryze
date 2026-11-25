@@ -12,10 +12,10 @@ from pathlib import Path
 import subprocess
 
 if __package__:
-    from .diarizer.archive import is_audio_candidate, is_excluded_dir, parse_filename, resolve_source_dir
+    from .diarizer.archive import is_audio_candidate, is_excluded_source_dir, parse_filename, resolve_source_dir
     from .diarizer.config import EXCLUDED_FILES, ROOT, TZ
 else:
-    from diarizer.archive import is_audio_candidate, is_excluded_dir, parse_filename, resolve_source_dir
+    from diarizer.archive import is_audio_candidate, is_excluded_source_dir, parse_filename, resolve_source_dir
     from diarizer.config import EXCLUDED_FILES, ROOT, TZ
 
 
@@ -155,9 +155,10 @@ def main():
     else:
         paths = []
         for base, dirs, files in os.walk(resolve_source_dir(args.folder)):
-            dirs[:] = sorted(d for d in dirs if not is_excluded_dir(d) and not (Path(base) / d).is_symlink())
-            paths += [Path(base) / name for name in sorted(files) if name.lower() not in EXCLUDED_FILES
-                      and not (Path(base) / name).is_symlink() and is_audio_candidate(str(Path(base) / name))]
+            folder = Path(base)
+            dirs[:] = sorted(d for d in dirs if not is_excluded_source_dir(folder / d))
+            paths += [folder / name for name in sorted(files) if name.lower() not in EXCLUDED_FILES
+                      and not (folder / name).is_symlink() and is_audio_candidate(str(folder / name))]
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             rows = list(pool.map(lambda p: audit_one(p, args.days * 86400), paths))
     if args.output:
