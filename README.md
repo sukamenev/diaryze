@@ -24,12 +24,12 @@ diaryze --dry-run
 diaryze --workers 2 --limit 5
 ```
 
-diaryze scans subfolders. From any directory, use `diaryze --folder "/path/to/recordings"`. To process one subfolder and keep the results in the shared archive, use `diaryze --root "/path/to/recordings" --folder Phone/2025`. With PyYAML already installed, `python3 /path/to/diaryze/scripts/diarize.py` accepts the same options.
+diaryze uses the current directory as the archive root by default. Use `diaryze --root "/path/to/recordings"` from elsewhere. Use `--folder Phone/2025` to limit both transcription and candidate preparation to a folder within the archive. With PyYAML already installed, `python3 /path/to/diaryze/scripts/diarize.py` accepts the same options.
 
 You can put a symlink named `diaryze` in the archive pointing at your existing checkout. From the archive root, run:
 
 ```bash
-python3 diaryze/scripts/diarize.py --root . --folder Phone/2025 --dry-run
+python3 diaryze/scripts/diarize.py --folder Phone/2025 --dry-run
 ```
 
 `--models model-a,model-b` sets the full model chain. Pass one name to use one model. `--model` sets the first model and keeps the configured fallbacks. diaryze batches short recordings, splits long ones with overlap, and maps timestamps back to the original. Reruns skip transcripts with a matching source hash. An interrupted long recording resumes from saved parts: the checkpoint is tied to the audio hash and part layout and is removed after the transcript is published.
@@ -50,7 +50,7 @@ Keep the checkout separate so the archive can move with its transcripts and cata
 
 ## Identify speakers
 
-Processing creates missing catalogs. To fill them first, run `diaryze --folder "/path/to/recordings" --init` and edit the YAML. Existing catalogs are preserved.
+Processing creates missing catalogs. To fill them first, run `diaryze --root "/path/to/recordings" --init` and edit the YAML. Existing catalogs are preserved.
 
 Example card in `Data/people.yaml`.
 
@@ -75,13 +75,13 @@ diaryze links speakers using filenames, phone numbers, catalog matches, and spee
 
 ### Phone owner voice references
 
-On the first run for phone folders without a known owner's sample, diaryze asks the model to compare short calls with different contacts and cut up to three candidate clips per `.owner` folder. It stops before transcription and prints the files under `Data/voice_samples/<person>/phone/candidate/` for listening.
+On the first run for phone folders without a known owner's sample, diaryze compares short calls with different contacts inside the selected folder and cuts up to three candidate clips per `.owner` folder. It can find `.owner` in a parent directory up to the archive root. It stops before transcription and prints the files under `Data/voice_samples/<person>/phone/candidate/` for listening.
 
-Listen to the clips in `candidate/` and move one or more selected FLAC files to the adjacent `confirmed/` folder for the same recording type. Leave their JSON sidecars in `candidate/`. On the next transcription run, diaryze verifies the moved clips, saves their provenance next to them, and clears the completed review set. It then uses the owner's closest dated reference in either direction. A phone clip wins ties. If the call date is unavailable, the most recent dated reference is used.
+Listen to the clips in `candidate/` and move the best FLAC to the adjacent `confirmed/` folder. Leave its JSON sidecar in `candidate/`. A rerun before approval shows the existing candidates. Once you move a clip, diaryze verifies it, saves its provenance, and continues with transcription. For each call, it uses one reference from the closest date in either direction. A phone clip wins ties. If the call date is unavailable, the most recent dated reference is used.
 
 `--prepare-voice-sample` prepares candidates for the selected folder’s owner without starting a transcription. Add a person ID to select one explicitly. `--approve-voice-sample "path/to/2025-03-14_01.flac"` confirms a clip, and `--reject-voice-sample "path/to/2025-03-14_01.flac"` discards its set.
 
-`--skip-voice-sample-preflight` starts transcription immediately, using approved references where available. The approved audio files can also be placed manually in the named folders.
+`--no-voice-samples` starts transcription without preparing or using samples. `--skip-voice-sample-preflight` starts transcription immediately and uses any approved references available.
 
 ## Audio recovery
 

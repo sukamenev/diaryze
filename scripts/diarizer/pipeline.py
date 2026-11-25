@@ -349,10 +349,14 @@ def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) 
     last_ms = -1
     part_warnings = []
     checkpoint = LongCheckpoint(item)
+    without_samples = getattr(args, 'no_voice_samples', False)
     restored = {}
     for part in item['parts']:
         saved = checkpoint.get(part['part'])
         if saved is None:
+            break
+        if without_samples and saved.get('voice_sample') != 'none':
+            checkpoint.drop_from(part['part'])
             break
         try:
             restored[part['part']] = _restore_part(
@@ -366,7 +370,9 @@ def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) 
         emit(f"Продолжение {item['audio_rel']}: сохранены части 1–{len(restored)} "
              f"из {len(item['parts'])}", flush=True)
         record('checkpoint_resumed', items=[item], parts=len(restored))
-    reference = owner_reference(item, people) if len(restored) < len(item['parts']) else None
+    reference = None
+    if not without_samples and len(restored) < len(item['parts']):
+        reference = owner_reference(item, people)
     new_voice_sample = voice_sample_value(reference)
     voice_samples = set()
     try:
@@ -420,7 +426,8 @@ def process_short_batch(items: list[dict], args, people: dict, orgs: dict, stats
     chain = getattr(args, 'model_chain', None) or [args.model]
     attempts = ModelAttempts(chain, stats.models, items, stop_on_quota=args.stop_on_quota)
     model_idx = 0
-    references = [owner_reference(item, people) for item in items]
+    without_samples = getattr(args, 'no_voice_samples', False)
+    references = [None if without_samples else owner_reference(item, people) for item in items]
     prompt = build_batch_prompt(items, people, orgs, voice_references=references)
     for item, reference in zip(items, references, strict=True):
         item['voice_sample'] = voice_sample_value(reference)

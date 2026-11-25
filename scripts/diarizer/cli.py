@@ -36,9 +36,9 @@ from .voice_samples import (
 # Parse CLI options, select the archive, and initialize processing.
 def main():
     ap = argparse.ArgumentParser(description="Parallel agy audio diarizer")
-    ap.add_argument("--root", help="Archive root, useful with --folder to limit the scan")
+    ap.add_argument("--root", default=".", help="Archive root (default: current directory)")
     ap.add_argument("--folder", "--subdir", dest="subdir", default=".", metavar="PATH",
-                    help="Archive root (default: current directory), or subfolder when --root is set")
+                    help="Folder to scan within the archive (default: the whole archive)")
     ap.add_argument("--init", action="store_true", help="Create empty local catalogs and exit")
     ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     ap.add_argument("--model", default=DEFAULT_MODEL)
@@ -71,6 +71,8 @@ def main():
                        help="Find up to three samples for the folder owner, or specify a person ID")
     voice.add_argument("--approve-voice-sample", metavar="FILE", help="Approve one candidate and clear its review set")
     voice.add_argument("--reject-voice-sample", metavar="PATH", help="Discard a pending set by candidate FLAC or folder")
+    voice.add_argument("--no-voice-samples", action="store_true",
+                       help="Transcribe without preparing or using any voice samples")
     ap.add_argument("--skip-voice-sample-preflight", action="store_true",
                     help="Transcribe immediately using any already approved voice samples")
     args = ap.parse_args()
@@ -94,10 +96,7 @@ def main():
         run_selftest(args)
         return
 
-    root = args.root if args.root is not None else args.subdir
-    if args.root is None:
-        args.subdir = "."
-    with use_archive(root) as archive_root:
+    with use_archive(args.root) as archive_root:
         args.root = archive_root
         try:
             source_dir = resolve_source_dir(args.subdir)
@@ -158,14 +157,16 @@ def _run_voice_sample_action(args, source_dir):
 
 # Print the clips and the destination for the selected files.
 def _show_voice_candidates(samples):
-    emit("Кандидаты на голосовой образец:\n" + "\n".join(str(path) for path in samples), flush=True)
+    emit("Кандидаты на голосовой образец\n" + "\n".join(str(path) for path in samples), flush=True)
     confirmed = samples[0].parent.with_name("confirmed")
-    emit(f"Переместите один или несколько выбранных FLAC в {confirmed}, оставив JSON рядом с кандидатами.")
+    emit(f"Прослушайте кандидатов и перенесите лучший FLAC в {confirmed}. Оставьте JSON в папке кандидатов.")
+    emit("После этого снова запустите расшифровку той же папки.")
 
 
-# Stage samples per phone owner folder and reserve transcription for the next run.
+# Stage samples for each phone owner within the requested folder.
 def _voice_sample_preflight(candidates, args):
     people, _ = load_refs()
+    requested = Path(resolve_source_dir(args.subdir))
     checked = set()
     owners_by_folder = {}
     waiting = False
@@ -179,12 +180,13 @@ def _voice_sample_preflight(candidates, args):
         if not person or owner_file in checked:
             continue
         checked.add(owner_file)
-        source = Path(config.ROOT) / Path(owner_file).parent
+        owner_root = Path(config.ROOT) / Path(owner_file).parent
+        source = requested if requested.is_relative_to(owner_root) else owner_root
         try:
+            if has_approved_sample(person):
+                continue
             samples = pending_voice_samples(person, source)
             if not samples:
-                if has_approved_sample(person):
-                    continue
                 waiting = True
                 samples = prepare_voice_samples(person, source, args, target_item=item)
         except InterruptedError:
@@ -203,7 +205,7 @@ def _voice_sample_preflight(candidates, args):
         else:
             emit(f"{owner_file}: не удалось подобрать образцы для {person}.")
     if waiting:
-        emit("Расшифровка отложена. Для запуска с уже доступными эталонами используйте --skip-voice-sample-preflight.")
+        emit("Расшифровка отложена. Подтвердите образец или запустите с --no-voice-samples.")
     return waiting
 
 
@@ -229,7 +231,8 @@ def _run(args):
 
 # Scan the pending queue, coordinate workers, and report final totals.
 def run_workers(args):
-    if not args.dry_run:
+    without_samples = getattr(args, 'no_voice_samples', False)
+    if not args.dry_run and not without_samples:
         for sample in import_confirmed_voice_samples():
             record('voice_sample_confirmed', path=str(sample))
             emit(f"Образец подтверждён: {sample}", flush=True)
@@ -254,7 +257,8 @@ def run_workers(args):
     if not cands:
         record('run_finished', summary={'done': 0, 'failed_files': 0}, failed_files=[])
         return
-    if not getattr(args, 'skip_voice_sample_preflight', False) and _voice_sample_preflight(cands, args):
+    if (not without_samples and not getattr(args, 'skip_voice_sample_preflight', False)
+            and _voice_sample_preflight(cands, args)):
         return
 
     pending_dq = deque(cands)

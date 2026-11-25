@@ -380,7 +380,7 @@ class GeneralPipelinePolicyTests(TemporaryArchive):
     # Check that CLI model exhaustion produces a nonzero exit status.
     def test_cli_reports_no_available_models_with_exit_one(self):
         with tempfile.TemporaryDirectory(prefix='fatal-cli-test-') as tmp, \
-                mock.patch('sys.argv', ['diarize.py', '--folder', tmp]), \
+                mock.patch('sys.argv', ['diarize.py', '--root', tmp]), \
                 mock.patch.object(cli, 'resolve_source_dir'), \
                 mock.patch.object(cli.shutil, 'which', return_value='/usr/bin/tool'), \
                 mock.patch.object(cli, '_get_libfaad', return_value=None), \

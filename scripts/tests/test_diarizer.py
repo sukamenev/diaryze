@@ -169,6 +169,19 @@ class PipelineTests(TemporaryArchive):
             self.assertFalse(Path(item["target_md"] + ".part").exists())
         self.assertEqual(len(archive.load_manifest_state()), 2)
 
+    # Bypass voice selection and record that the batch ran without a sample.
+    def test_batch_can_force_recognition_without_voice_samples(self):
+        item = self.item()
+        args = self.args()
+        args.no_voice_samples = True
+        with mock.patch.object(pipeline, "owner_reference") as select, \
+                mock.patch.object(pipeline, "run_agy", return_value=envelope(REPLY)), \
+                mock.patch.object(pipeline, "agy_forget"), contextlib.redirect_stdout(io.StringIO()):
+            pipeline.process_short_batch([item], args, {}, {}, pipeline.Stats())
+        select.assert_not_called()
+        md = Path(item["target_md"]).read_text(encoding="utf-8")
+        self.assertEqual(yaml.safe_load(md.split("---", 2)[1])["voice_sample"], "none")
+
     # Check that published Markdown inherits its recording date as mtime.
     def test_commit_md_sets_mtime_from_recorded_at(self):
         item = self.item("call_2024-06-04_13-18-54_incoming.m4a")
@@ -448,6 +461,22 @@ class CheckpointTests(TemporaryArchive):
         md = Path(item["target_md"]).read_text(encoding="utf-8")
         self.assertEqual(yaml.safe_load(md.split("---", 2)[1])["voice_sample"], label)
 
+    # Redo parts that used a sample when the recording is resumed without samples.
+    def test_without_samples_reprocesses_a_checkpoint_with_a_reference(self):
+        item = self.long_item()
+        label = "ivanov_ivan/phone/confirmed/2025-03-14_01.flac"
+        self.save_first_part(checkpoints.LongCheckpoint(item), voice_sample=label)
+        args = self.args()
+        args.no_voice_samples = True
+        with mock.patch.object(pipeline, "owner_reference") as select, \
+                mock.patch.object(pipeline, "run_agy", return_value=envelope(REPLY)) as run, \
+                mock.patch.object(pipeline, "agy_forget"), contextlib.redirect_stdout(io.StringIO()):
+            pipeline.process_long_item(item, args, {}, {}, pipeline.Stats())
+        select.assert_not_called()
+        self.assertEqual(run.call_count, 2)
+        md = Path(item["target_md"]).read_text(encoding="utf-8")
+        self.assertEqual(yaml.safe_load(md.split("---", 2)[1])["voice_sample"], "none")
+
     # Check that changed segment boundaries invalidate incompatible checkpoints.
     def test_layout_change_ignores_saved_parts(self):
         item = self.long_item()
@@ -617,8 +646,8 @@ class RuntimeTests(unittest.TestCase):
         cwd = Path.cwd()
         cases = (
             ([], cwd, "."),
-            (["--folder", "Recordings"], cwd / "Recordings", "."),
-            (["--subdir", "Phone/2020"], cwd / "Phone/2020", "."),
+            (["--folder", "Recordings"], cwd, "Recordings"),
+            (["--subdir", "Phone/2020"], cwd, "Phone/2020"),
             (["--root", "archive", "--folder", "Phone/2020"], cwd / "archive", "Phone/2020"),
         )
         for flags, root, folder in cases:

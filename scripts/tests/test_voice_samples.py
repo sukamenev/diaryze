@@ -135,12 +135,17 @@ class VoiceSampleTests(unittest.TestCase):
         archive.init_catalogs()
         people_file, _ = archive.catalog_paths()
         Path(people_file).write_text(f'people:\n  {PERSON}:\n    name: Алексей\n', encoding="utf-8")
+        scope = self.phone / "2021"
+        scope.mkdir()
+        self.args.subdir = "Phone/2021"
         sources = []
         for index, direction in enumerate(("incoming", "outgoing", "incoming"), 1):
-            path = self.phone / f"Contact{index}_+7000000000{index}_2025-05-1{index}_10-00-00_{direction}.wav"
+            path = scope / f"Contact{index}_+7000000000{index}_2021-05-1{index}_10-00-00_{direction}.wav"
             subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i",
                             f"sine=frequency={400 + 25 * index}:duration=18", str(path)], check=True)
             sources.append(path)
+        outside = self.phone / "Other_+70000000004_2021-05-13_10-00-00_outgoing.wav"
+        shutil.copyfile(sources[0], outside)
         answer = [
             {"call": n, "start_ms": 1000, "end_ms": 12_000, "evidence": "fixture",
              "supporting_calls": [2 if n == 1 else 1]} for n in range(1, 4)
@@ -155,15 +160,16 @@ class VoiceSampleTests(unittest.TestCase):
             self.assertIsNone(cli.run_workers(self.args))
             provider.assert_called_once()
             transcribe.assert_not_called()
-        candidates = voice_samples.pending_voice_samples(PERSON, self.phone)
+        candidates = voice_samples.pending_voice_samples(PERSON, scope)
         self.assertEqual(len(candidates), 3)
-        item = archive.scan_pending()[0]
+        item = archive.scan_pending("Phone/2021")[0]
         self.assertIsNone(voice_samples.owner_reference(item, PEOPLE))
         pending = self.root / "Data/voice_samples" / PERSON / "phone/candidate"
         confirmed = pending.with_name("confirmed")
         self.assertTrue(all(path.parent == pending for path in candidates))
         provenance = {path.name: json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
                       for path in candidates}
+        self.assertTrue(all(meta["source"]["audio"].startswith("Phone/2021/") for meta in provenance.values()))
         metadata = provenance[candidates[1].name]
         original = self.root / metadata["source"]["audio"]
         self.assertEqual(metadata["source"]["sha256"], archive.sha256_file(original))
@@ -209,3 +215,5 @@ class VoiceSampleTests(unittest.TestCase):
         self.assertEqual(approved.read_bytes(), b"candidate fixture")
         self.assertFalse(clip.exists())
         self.assertEqual(voice_samples.pending_voice_samples(PERSON, self.phone), [other])
+        with mock.patch.object(cli, "load_refs", return_value=(PEOPLE, {})):
+            self.assertFalse(cli._voice_sample_preflight([{"audio_rel": "Phone/call.wav"}], self.args))
