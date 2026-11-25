@@ -15,11 +15,11 @@ import yaml
 
 if __package__:
     from .diarizer.archive import append_manifest, load_manifest_state, load_refs, sync_file_mtime
-    from .diarizer.config import ROOT
+    from .diarizer.config import ROOT, data_path, transcripts_dir
     from .diarizer.identification import patch_markdown, split_markdown
 else:
     from diarizer.archive import append_manifest, load_manifest_state, load_refs, sync_file_mtime
-    from diarizer.config import ROOT
+    from diarizer.config import ROOT, data_path, transcripts_dir
     from diarizer.identification import patch_markdown, split_markdown
 
 
@@ -27,7 +27,7 @@ else:
 def migrate(root, *, folder=None, apply=False, patcher=None, journal_prefix="identification",
             patcher_with_path=False):
     root = Path(root).resolve()
-    text_root = root / "Text"
+    text_root = transcripts_dir(root).resolve()
     folder = Path(folder).resolve() if folder else text_root
     if not folder.is_relative_to(text_root.resolve()) or not folder.is_dir():
         raise ValueError("Choose a folder inside " + str(text_root))
@@ -76,7 +76,7 @@ def migrate(root, *, folder=None, apply=False, patcher=None, journal_prefix="ide
                     continue
                 if journal is None:
                     stamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%f%z")
-                    log = root / "work/logs/migrations" / (journal_prefix + "-" + stamp + ".jsonl")
+                    log = data_path("logs", "migrations", journal_prefix + "-" + stamp + ".jsonl", root=root)
                     log.parent.mkdir(parents=True, exist_ok=True)
                     journal = log.open("x", encoding="utf-8")
                     result["journal"] = str(log.relative_to(root))
@@ -120,7 +120,7 @@ def migrate(root, *, folder=None, apply=False, patcher=None, journal_prefix="ide
 # Run the identification migration in preview or apply mode.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--folder", help="Folder inside Text (default: all Text)")
+    parser.add_argument("--folder", help="Folder inside the transcript tree (default: all transcripts)")
     parser.add_argument("--apply", action="store_true", help="Write changes; otherwise only report")
     args = parser.parse_args()
     result = migrate(ROOT, folder=args.folder, apply=args.apply)

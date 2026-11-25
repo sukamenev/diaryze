@@ -21,7 +21,7 @@ else:
 # Run the catalog-field migration in preview or apply mode.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--folder', help='Folder inside Text (default: all Text)')
+    parser.add_argument('--folder', help='Folder inside the transcript tree (default: all transcripts)')
     parser.add_argument('--summaries', help='JSON map keyed by audio SHA-256: source_summary and summary')
     parser.add_argument('--apply', action='store_true')
     args = parser.parse_args()

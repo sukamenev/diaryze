@@ -38,12 +38,13 @@ In the author's runs, **5 hours of Antigravity quota covered roughly 18–26 hou
 
 ## What the archive contains
 
-- `Text/` mirrors the source paths. `Phone/2025/call.m4a` becomes `Text/Phone/2025/call.m4a.md`.
+- `Data/Text/` mirrors the source paths. `Phone/2025/call.m4a` becomes `Data/Text/Phone/2025/call.m4a.md`.
 - `Data/people.yaml` and `Data/orgs.yaml` hold the catalogs. `Data/manifest.jsonl` records processing history. Existing archives can still use any of these files in `docs/`.
-- `Data/voice_samples/<person>/<phone|recorder>/YYYY-MM-DD_NN.flac` holds approved voice references, independently of the source calls.
-- `work/logs/` holds diagnostics, which can contain model responses.
-- `work/checkpoints/` holds accepted long-recording parts until the final transcript is published.
-- `work/reports/` holds archive-specific reports and benchmark results.
+- `Data/voice_samples/<person>/<phone|recorder>/confirmed/YYYY-MM-DD_NN.flac` holds approved voice references, independently of the source calls.
+- `Data/voice_samples/<person>/<phone|recorder>/candidate/` holds clips awaiting review.
+- `Data/logs/` holds diagnostics, which can contain model responses.
+- `Data/.work/checkpoints/` holds accepted long-recording parts until the final transcript is published.
+- `Data/reports/` holds archive-specific reports and benchmark results.
 
 Keep the checkout separate so the archive can move with its transcripts and catalogs. Originals stay in place. `agy` sends the audio and transcription context to the model provider.
 
@@ -74,11 +75,11 @@ diaryze links speakers using filenames, phone numbers, catalog matches, and spee
 
 ### Phone owner voice references
 
-On the first run for phone folders without a known owner's sample, diaryze asks the model to compare short calls with different contacts and cut up to three candidate clips per `.owner` folder. It stops before transcription and prints the files under `work/voice_samples/` for listening.
+On the first run for phone folders without a known owner's sample, diaryze asks the model to compare short calls with different contacts and cut up to three candidate clips per `.owner` folder. It stops before transcription and prints the files under `Data/voice_samples/<person>/phone/candidate/` for listening.
 
-Listen to the files in `review/candidates/` and move at least one selected FLAC to the adjacent `review/confirmed/` folder. Keep `review.json` beside the two folders. On the next run, diaryze verifies the selected clips, stores them and their provenance in `Data/voice_samples/`, and clears the completed review set. It then uses the owner's closest dated reference in either direction. A phone clip wins ties. If the call date is unavailable, the most recent dated reference is used.
+Listen to the clips in `candidate/` and move one or more selected FLAC files to the adjacent `confirmed/` folder for the same recording type. Leave their JSON sidecars in `candidate/`. On the next transcription run, diaryze verifies the moved clips, saves their provenance next to them, and clears the completed review set. It then uses the owner's closest dated reference in either direction. A phone clip wins ties. If the call date is unavailable, the most recent dated reference is used.
 
-`--prepare-voice-sample PERSON` requests a fresh review set. `--approve-voice-sample "path/to/02.flac"` confirms a clip from the terminal. `--reject-voice-sample "path/to/candidates"` discards the set.
+`--prepare-voice-sample` prepares candidates for the selected folder’s owner without starting a transcription. Add a person ID to select one explicitly. `--approve-voice-sample "path/to/2025-03-14_01.flac"` confirms a clip, and `--reject-voice-sample "path/to/2025-03-14_01.flac"` discards its set.
 
 `--skip-voice-sample-preflight` starts transcription immediately, using approved references where available. The approved audio files can also be placed manually in the named folders.
 
@@ -107,7 +108,7 @@ python3 /path/to/diaryze/scripts/find.py --root "/path/to/recordings" --folder P
 | [find_audio_duplicates.py](scripts/find_audio_duplicates.py) | Report byte-identical audio files. |
 | [audit_recording_dates.py](scripts/audit_recording_dates.py) | Compare dates from filenames, metadata, and file times. Changing audio timestamps requires a plan and `--apply`. |
 | [sync_md_dates.py](scripts/sync_md_dates.py) | Check transcript file times against recording dates. Use `--apply` to sync. |
-| [swap_speakers.py](scripts/swap_speakers.py) | Swap two speaker labels in the timestamped turns of one transcript. Run with `"Text/recording.m4a.md" "Alice" "Bob"` to preview. Add `--apply` to save. |
+| [swap_speakers.py](scripts/swap_speakers.py) | Swap two speaker labels in the timestamped turns of one transcript. Run with `"Data/Text/recording.m4a.md" "Alice" "Bob"` to preview. Add `--apply` to save. |
 | [relink_catalog_speakers.py](scripts/relink_catalog_speakers.py) | Match unlinked speakers to existing cards. |
 | [migrate_identification.py](scripts/migrate_identification.py), [migrate_phone_owners.py](scripts/migrate_phone_owners.py), [migrate_catalog_fields.py](scripts/migrate_catalog_fields.py) | Preview transcript migrations. Use `--apply` to write changes. |
 

@@ -42,7 +42,7 @@ class VoiceSampleTests(unittest.TestCase):
 
     # Place an approved fixture where references are discovered automatically.
     def sample(self, filename, channel="phone"):
-        path = self.root / "Data" / "voice_samples" / PERSON / channel / filename
+        path = self.root / "Data" / "voice_samples" / PERSON / channel / "confirmed" / filename
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"approved fixture")
         return path
@@ -115,6 +115,20 @@ class VoiceSampleTests(unittest.TestCase):
             self.assertTrue(cli._voice_sample_preflight(items, self.args))
         self.assertEqual([call.args[1] for call in prepare.call_args_list], [self.phone, second])
 
+    # Resolve a standalone preparation request to the inherited folder owner.
+    def test_prepare_without_person_uses_nearest_owner(self):
+        scope = self.phone / "2021"
+        scope.mkdir()
+        argv = ["diarize.py", "--root", str(self.root), "--folder", "Phone/2021", "--prepare-voice-sample"]
+        with (mock.patch("sys.argv", argv),
+              mock.patch.object(cli, "load_refs", return_value=(PEOPLE, {})),
+              mock.patch.object(cli, "prepare_voice_samples", return_value=[scope / "fixture.flac"]) as prepare,
+              mock.patch.object(cli, "emit"),
+              mock.patch.object(cli, "find_untrunc", return_value=None),
+              mock.patch.object(cli, "_get_libfaad", return_value=None)):
+            self.assertEqual(cli.main(), 0)
+        self.assertEqual(prepare.call_args.args[:2], (PERSON, str(scope)))
+
     # Exercise real cutting, file-manager selections, and storage independent of the source.
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "requires FFmpeg")
     def test_stages_three_then_uses_only_the_moved_clips(self):
@@ -145,14 +159,17 @@ class VoiceSampleTests(unittest.TestCase):
         self.assertEqual(len(candidates), 3)
         item = archive.scan_pending()[0]
         self.assertIsNone(voice_samples.owner_reference(item, PEOPLE))
-        review = candidates[0].parent.parent
-        manifest = json.loads((review / "review.json").read_text(encoding="utf-8"))
-        metadata = manifest["clips"][candidates[1].name]
+        pending = self.root / "Data/voice_samples" / PERSON / "phone/candidate"
+        confirmed = pending.with_name("confirmed")
+        self.assertTrue(all(path.parent == pending for path in candidates))
+        provenance = {path.name: json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+                      for path in candidates}
+        metadata = provenance[candidates[1].name]
         original = self.root / metadata["source"]["audio"]
         self.assertEqual(metadata["source"]["sha256"], archive.sha256_file(original))
         original.unlink()
         for candidate in candidates[1:]:
-            candidate.rename(review / "confirmed" / candidate.name)
+            candidate.rename(confirmed / candidate.name)
         self.assertIsNone(voice_samples.owner_reference(item, PEOPLE))
         with (mock.patch.object(voice_samples, "run_agy") as provider,
               mock.patch.object(cli, "run_job") as transcribe,
@@ -168,23 +185,27 @@ class VoiceSampleTests(unittest.TestCase):
             provider.assert_not_called()
             transcribe.assert_called_once()
             self.assertIsNotNone(voice_samples.owner_reference(item, PEOPLE))
-        stored = list((self.root / "Data" / "voice_samples" / PERSON / "phone").glob("*.flac"))
+        stored = list(confirmed.glob("*.flac"))
         self.assertEqual({archive.sha256_file(path) for path in stored},
-                         {manifest["clips"][candidate.name]["sha256"] for candidate in candidates[1:]})
+                         {provenance[candidate.name]["sha256"] for candidate in candidates[1:]})
         self.assertTrue(all(path.with_suffix(".json").is_file() for path in stored))
-        self.assertFalse(review.exists())
+        self.assertEqual(list(pending.iterdir()), [])
         self.assertTrue(all(path.exists() for path in sources if path != original))
 
-    # Keep the command-based review available for already generated legacy sets.
-    def test_approves_legacy_candidate_with_sidecar(self):
-        folder = self.root / "work" / "voice_samples" / PERSON / "Phone" / "candidates"
+    # Confirm one candidate without removing candidates from a different source folder.
+    def test_approves_candidate_without_affecting_other_reviews(self):
+        folder = self.root / "Data/voice_samples" / PERSON / "phone/candidate"
         folder.mkdir(parents=True)
-        clip = folder / "01.flac"
-        clip.write_bytes(b"candidate fixture")
-        clip.with_suffix(".json").write_text(json.dumps({
-            "recorded_on": "2025-05-10", "channel": "phone", "person": PERSON,
-            "sha256": archive.sha256_file(clip),
-        }), encoding="utf-8")
+        clip = folder / "2025-05-10_01.flac"
+        other = folder / "2025-05-10_02.flac"
+        for path, scope in ((clip, "Phone/2025"), (other, "Phone")):
+            path.write_bytes(b"candidate fixture")
+            path.with_suffix(".json").write_text(json.dumps({
+                "recorded_on": "2025-05-10", "channel": "phone", "person": PERSON,
+                "sha256": archive.sha256_file(path), "scope": scope,
+            }), encoding="utf-8")
         approved = voice_samples.review_voice_sample(clip, approve=True)
+        self.assertEqual(approved, folder.with_name("confirmed") / clip.name)
         self.assertEqual(approved.read_bytes(), b"candidate fixture")
-        self.assertFalse(folder.exists())
+        self.assertFalse(clip.exists())
+        self.assertEqual(voice_samples.pending_voice_samples(PERSON, self.phone), [other])

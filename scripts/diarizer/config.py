@@ -11,6 +11,19 @@ from pathlib import Path
 ROOT = os.getcwd()
 
 
+# Resolve a path under the archive's generated data directory.
+def data_path(*parts, root=None):
+    return Path(ROOT if root is None else root).joinpath("Data", *parts)
+
+
+# Use the new transcript tree, or the existing tree in an older archive.
+def transcripts_dir(root=None):
+    root = Path(ROOT if root is None else root)
+    current = data_path("Text", root=root)
+    legacy = root / "Text"
+    return legacy if not current.exists() and legacy.is_dir() else current
+
+
 # Set the shared archive paths for a CLI run.
 @contextmanager
 def use_archive(root):
@@ -75,7 +88,7 @@ AGY_SHARED = ("antigravity-oauth-token", "settings.json", "installation_id")
 CUSTOM_AGENT_NAME = "audio-reader"
 
 
-EXCLUDED_DIRS = {"text", "data", "docs", "scripts", "work", "prompts", "promts", ".git", ".agents", ".codex", ".aws", ".bin", "__pycache__", "@eadir", ".venv"}
+EXCLUDED_DIRS = {"text", "data", "docs", "scripts", "work", ".work", "prompts", "promts", ".git", ".agents", ".codex", ".aws", ".bin", "__pycache__", "@eadir", ".venv"}
 
 AUDIO_EXTENSIONS = {
     ".3g2", ".3gp", ".aac", ".ac3", ".adts", ".aif", ".aifc", ".aiff",

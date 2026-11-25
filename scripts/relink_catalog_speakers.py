@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conservatively link unlinked speakers in Text/ MD files to matching entries in people.yaml / orgs.yaml."""
+"""Link speakers in Markdown transcripts to matching people or organization cards."""
 
 import argparse
 from decimal import Decimal
@@ -207,8 +207,8 @@ def relink_markdown_speakers(raw: bytes, people: dict, orgs: dict) -> tuple[byte
 
 # Scan the archive for speaker links to preview or update.
 def main():
-    ap = argparse.ArgumentParser(description="Relink person: null speakers in Text/ MD files to people.yaml entries.")
-    ap.add_argument("--folder", help="Optional subfolder under Text/")
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--folder", help="Optional subfolder in the transcript tree")
     ap.add_argument("--apply", action="store_true", help="Write updated MD files")
     args = ap.parse_args()
     result = migrate(ROOT, folder=args.folder, apply=args.apply,

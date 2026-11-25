@@ -11,10 +11,10 @@ from pathlib import Path
 
 if __package__:
     from .diarizer.archive import is_audio_candidate, is_excluded_dir
-    from .diarizer.config import EXCLUDED_FILES, ROOT
+    from .diarizer.config import EXCLUDED_FILES, ROOT, data_path
 else:
     from diarizer.archive import is_audio_candidate, is_excluded_dir
-    from diarizer.config import EXCLUDED_FILES, ROOT
+    from diarizer.config import EXCLUDED_FILES, ROOT, data_path
 
 
 # Capture file metadata to detect changes during the duplicate scan.
@@ -99,11 +99,11 @@ def audit(root):
 # Run a read-only duplicate audit and write its reports.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', help='New report directory (default: work/reports/duplicates/<timestamp>)')
+    parser.add_argument('--output', help='New report directory (default: Data/reports/duplicates/<timestamp>)')
     args = parser.parse_args()
     groups, summary = audit(ROOT)
     stamp = datetime.now().astimezone().strftime('%Y%m%dT%H%M%S%z')
-    out = Path(args.output) if args.output else Path(ROOT) / "work" / "reports" / 'duplicates' / stamp
+    out = Path(args.output) if args.output else data_path("reports", "duplicates", stamp, root=ROOT)
     out.mkdir(parents=True, exist_ok=False)
     (out / 'groups.jsonl').write_text(''.join(json.dumps(g, ensure_ascii=False) + '\n' for g in groups))
     summary.update(groups=len(groups), extra_copies=sum(len(g['files']) - 1 for g in groups),

@@ -49,7 +49,7 @@ class TemporaryArchive(unittest.TestCase):
         source.write_bytes(b"synthetic input: " + name.encode())
         return {
             "audio_abs": str(source), "audio_rel": str(source.relative_to(self.root)),
-            "clean_abs": str(source), "target_md": str(self.root / "Text/Phone/2026" / (name + ".md")),
+            "clean_abs": str(source), "target_md": str(self.root / "Data/Text/Phone/2026" / (name + ".md")),
             "sha256": archive.sha256_file(source), "duration_ms": duration,
             "dt": None, "direction": None, "contact": "Test", "phones": [],
         }
@@ -60,7 +60,7 @@ class ArchiveTests(TemporaryArchive):
     def test_whole_archive_scan_excludes_text_services_and_nonaudio(self):
         wanted = {"Phone/2019/call.wav", "Phone/2025/call.m4a", "Recordings/mono.mp3",
                   "Smartphone/voice.opus", "root.amr", "Phone/.контакт.m4a", "Phone/raw"}
-        excluded = {"Text/Phone/fake.wav", "docs/example.wav", "scripts/fixture.wav", "Data/voice_samples/sample.flac",
+        excluded = {"Text/Phone/fake.wav", "Data/Text/Phone/fake.wav", "docs/example.wav", "scripts/fixture.wav", "Data/voice_samples/sample.flac",
                     ".agents/sample.m4a", "Phone/.Trash/deleted.m4a", "Phone/.nomedia"}
         for name in wanted | excluded:
             path = self.root / name
@@ -141,7 +141,7 @@ class PipelineTests(TemporaryArchive):
         scope = self.root / "Phone/2026/other"
         (scope / ".owner").write_text("type: recorder\n", encoding="utf-8")
         (self.root / "Phone/.owner").write_text("type: phone\nowner: ivanov_ivan\n", encoding="utf-8")
-        reference = self.root / "Data/voice_samples/ivanov_ivan/phone/2025-03-14_01.flac"
+        reference = self.root / "Data/voice_samples/ivanov_ivan/phone/confirmed/2025-03-14_01.flac"
         reference.parent.mkdir(parents=True)
         reference.write_bytes(b"approved fixture")
         reply = "\n".join(f"=== ITEM {i} ===\n{REPLY}" for i in (1, 2))
@@ -157,7 +157,7 @@ class PipelineTests(TemporaryArchive):
         self.assertIn("Готово 1", output.getvalue())
         self.assertIn("Готово 2", output.getvalue())
         self.assertNotIn("\x1b", output.getvalue())
-        for item, expected_sample in zip(items, ("ivanov_ivan/phone/2025-03-14_01.flac", "none"), strict=True):
+        for item, expected_sample in zip(items, ("ivanov_ivan/phone/confirmed/2025-03-14_01.flac", "none"), strict=True):
             md = Path(item["target_md"]).read_text()
             self.assertIn("[00:00:01.00] **Собеседник** Привет.", md)
             meta = yaml.safe_load(md.split("---", 2)[1])
@@ -435,7 +435,7 @@ class CheckpointTests(TemporaryArchive):
     # Keep a shared voice reference when resuming a recording processed with that sample.
     def test_resumes_with_the_same_voice_sample(self):
         item = self.long_item()
-        label = "ivanov_ivan/phone/2025-03-14_01.flac"
+        label = "ivanov_ivan/phone/confirmed/2025-03-14_01.flac"
         reference = self.root / "Data/voice_samples" / label
         reference.parent.mkdir(parents=True)
         reference.write_bytes(b"approved fixture")

@@ -21,7 +21,7 @@ _RUN_ID = None
 @contextmanager
 def run_log(directory=None):
     global _LOG, _RUN_ID
-    directory = Path(directory) if directory else Path(config.ROOT) / "work" / "logs"
+    directory = Path(directory) if directory else config.data_path("logs")
     directory.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now(TZ).strftime('%Y%m%dT%H%M%S%f%z') + '-' + str(os.getpid())
     path = directory / ('diarize-' + run_id + '.jsonl')

@@ -67,9 +67,10 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="List pending queue without running agy")
     ap.add_argument("--selftest", action="store_true", help="Run internal parser/validator/recovery self-test")
     voice = ap.add_mutually_exclusive_group()
-    voice.add_argument("--prepare-voice-sample", metavar="PERSON", help="Find and cut up to three owner samples for review")
+    voice.add_argument("--prepare-voice-sample", nargs="?", const=True, metavar="PERSON",
+                       help="Find up to three samples for the folder owner, or specify a person ID")
     voice.add_argument("--approve-voice-sample", metavar="FILE", help="Approve one candidate and clear its review set")
-    voice.add_argument("--reject-voice-sample", metavar="DIR", help="Discard a pending review set")
+    voice.add_argument("--reject-voice-sample", metavar="PATH", help="Discard a pending set by candidate FLAC or folder")
     ap.add_argument("--skip-voice-sample-preflight", action="store_true",
                     help="Transcribe immediately using any already approved voice samples")
     args = ap.parse_args()
@@ -119,7 +120,7 @@ def main():
             except (OSError, ValueError, yaml.YAMLError) as exc:
                 ap.error(str(exc))
             init_catalogs()
-            (Path(archive_root) / "Text").mkdir(exist_ok=True)
+            config.transcripts_dir().mkdir(parents=True, exist_ok=True)
         return _run(args)
 
 
@@ -129,6 +130,11 @@ def _run_voice_sample_action(args, source_dir):
         with stop_signals(), preserve_terminal():
             if person := args.prepare_voice_sample:
                 people, _ = load_refs()
+                if person is True:
+                    marker = Path(source_dir).relative_to(config.ROOT) / ".owner"
+                    person, _ = phone_owner({"audio_rel": marker.as_posix()}, people)
+                    if person is None:
+                        raise ValueError("Укажите папку с известным владельцем телефона или передайте ID владельца")
                 if person not in people:
                     raise ValueError(f"Нет карточки в справочнике: {person}")
                 samples = prepare_voice_samples(person, source_dir, args)
@@ -153,11 +159,8 @@ def _run_voice_sample_action(args, source_dir):
 # Print the clips and the destination for the selected files.
 def _show_voice_candidates(samples):
     emit("Кандидаты на голосовой образец:\n" + "\n".join(str(path) for path in samples), flush=True)
-    confirmed = samples[0].parent.parent / "confirmed"
-    if confirmed.is_dir():
-        emit(f"Переместите один или несколько выбранных FLAC в {confirmed} и запустите скрипт снова.")
-    else:
-        emit('Для этого набора выберите файл через --approve-voice-sample "путь_к_файлу.flac".')
+    confirmed = samples[0].parent.with_name("confirmed")
+    emit(f"Переместите один или несколько выбранных FLAC в {confirmed}, оставив JSON рядом с кандидатами.")
 
 
 # Stage samples per phone owner folder and reserve transcription for the next run.

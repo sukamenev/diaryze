@@ -23,7 +23,7 @@ CHECKPOINT_VERSION = 1
 
 # Locate the archive directory for resumable transcription checkpoints.
 def checkpoint_dir() -> Path:
-    return Path(config.ROOT) / "work" / "checkpoints"
+    return config.data_path(".work", "checkpoints")
 
 
 # Record the part boundaries that determine checkpoint compatibility.
@@ -37,6 +37,9 @@ class LongCheckpoint:
         self.item = item
         self.path = checkpoint_dir() / f"{item['sha256']}.json"
         self.parts = {}
+        legacy_path = Path(config.ROOT) / "work" / "checkpoints" / self.path.name
+        if not self.path.exists() and legacy_path.is_file():
+            self.path = legacy_path
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except FileNotFoundError:

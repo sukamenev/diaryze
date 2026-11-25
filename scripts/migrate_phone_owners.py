@@ -55,7 +55,7 @@ def patch_phone_owners(raw, people, orgs, *, root=ROOT, audio_rel=None):
 # Run the silent phone owner migration in preview or apply mode.
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--folder", help="Optional folder inside Text/")
+    ap.add_argument("--folder", help="Optional folder inside the transcript tree")
     ap.add_argument("--apply", action="store_true", help="Write changes and update manifest")
     args = ap.parse_args()
     result = migrate(ROOT, folder=args.folder, apply=args.apply,

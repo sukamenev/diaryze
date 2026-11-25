@@ -228,7 +228,7 @@ def is_excluded_dir(name: str) -> bool:
 # Locate persistent archive data and support older archives that stored it in docs.
 def _archive_data_path(filename, root):
     root = config.ROOT if root is None else root
-    current = os.path.join(root, "Data", filename)
+    current = str(config.data_path(filename, root=root))
     legacy = os.path.join(root, "docs", filename)
     return legacy if not os.path.exists(current) and os.path.exists(legacy) else current
 
@@ -289,7 +289,7 @@ def load_refs(*, root=None):
 def init_catalogs():
     """Seed empty catalogs while preserving files the user already has."""
     versions = {"people": PEOPLE_CATALOG_SCHEMA_VERSION, "orgs": ORGS_CATALOG_SCHEMA_VERSION}
-    os.makedirs(os.path.join(config.ROOT, "Data", "voice_samples"), exist_ok=True)
+    config.data_path("voice_samples").mkdir(parents=True, exist_ok=True)
     with CATALOG_LOCK:
         for path, key in zip(catalog_paths(), ("people", "orgs")):
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -540,6 +540,7 @@ def scan_pending(subdir: str = ".", retry_skipped: bool = False, retry_refused: 
                  *, retry_recovery: bool = False):
     """Scan subdir newest-first for audio files without a matching MD or terminal status."""
     src_root = resolve_source_dir(subdir)
+    text_root = config.transcripts_dir()
     mstate = load_manifest_state()
     cands = []
     for dirpath, dirnames, filenames in os.walk(src_root):
@@ -564,7 +565,7 @@ def scan_pending(subdir: str = ".", retry_skipped: bool = False, retry_refused: 
                     continue
             if st == "refused" and not retry_refused:
                 continue
-            md_path = os.path.join(config.ROOT, "Text", rel + ".md")
+            md_path = str(text_root / (rel + ".md"))
             if os.path.exists(md_path) and prev and prev.get("status") == "done":
                 # Fast path: assume matching unless we want deep rehash; check sha if needed
                 real_sha = sha256_file(fp)

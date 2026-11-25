@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only search and filtering across Text/ Markdown transcripts."""
+"""Read-only search and filtering across Markdown transcripts."""
 
 import argparse
 import json
@@ -10,11 +10,11 @@ import sys
 import yaml
 
 if __package__:
-    from .diarizer.config import ROOT, TS_LINE_RE
+    from .diarizer.config import ROOT, TS_LINE_RE, transcripts_dir
     from .diarizer.markdown import TranscriptFile
     from .diarizer.owners import find_folder_owner
 else:
-    from diarizer.config import ROOT, TS_LINE_RE
+    from diarizer.config import ROOT, TS_LINE_RE, transcripts_dir
     from diarizer.markdown import TranscriptFile
     from diarizer.owners import find_folder_owner
 
@@ -66,18 +66,19 @@ def _is_bot_or_temp_only(speakers: dict, owner=None) -> bool:
 
 
 # Resolve a requested search folder within the transcript tree.
-def _resolve_search_dir(root: Path, folder: str | None) -> Path:
-    text_root = (root / "Text").resolve()
+def _resolve_search_dir(text_root: Path, folder: str | None) -> Path:
     if not folder or folder == ".":
         return text_root
     cleaned = folder.strip().lstrip("/")
-    if cleaned == "Text":
-        return text_root
-    if cleaned.startswith("Text/"):
-        cleaned = cleaned[len("Text/"):]
+    for prefix in ("Data/Text", "Text"):
+        if cleaned == prefix:
+            return text_root
+        if cleaned.startswith(prefix + "/"):
+            cleaned = cleaned[len(prefix) + 1:]
+            break
     target = (text_root / cleaned).resolve()
     if not target.is_relative_to(text_root) or not target.is_dir():
-        raise ValueError(f"Folder not found inside Text/: {folder}")
+        raise ValueError(f"Folder not found in the transcript tree: {folder}")
     return target
 
 
@@ -116,8 +117,8 @@ def search_transcripts(
     limit: int = 0,
 ) -> list[dict]:
     root_path = Path(root).resolve()
-    text_root = (root_path / "Text").resolve()
-    search_dir = _resolve_search_dir(root_path, folder)
+    text_root = transcripts_dir(root_path).resolve()
+    search_dir = _resolve_search_dir(text_root, folder)
     id_filter = set(identification or [])
     phone_needle = _phone_digits(phone) if phone else ""
     contact_needle = (contact or "").strip().lower()
@@ -250,7 +251,7 @@ def format_table(rows: list[dict]) -> str:
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", default=ROOT, help="Audio archive root (default: current directory)")
-    ap.add_argument("--folder", help="Subfolder inside Text/ (e.g. Phone/2025)")
+    ap.add_argument("--folder", help="Subfolder inside the transcript tree (e.g. Phone/2025)")
     ap.add_argument("--min-sec", type=float)
     ap.add_argument("--max-sec", type=float)
     ap.add_argument("--min-words", type=int)

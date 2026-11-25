@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synchronize Text/ MD filesystem mtime to recorded_at (or filename date) for chronological sorting."""
+"""Synchronize transcript file times to recorded_at or the date in the filename."""
 
 import argparse
 from datetime import datetime
@@ -9,18 +9,18 @@ import os
 
 if __package__:
     from .diarizer.archive import recorded_mtime_ns
-    from .diarizer.config import ROOT, TZ
+    from .diarizer.config import ROOT, TZ, data_path, transcripts_dir
     from .diarizer.identification import split_markdown
 else:
     from diarizer.archive import recorded_mtime_ns
-    from diarizer.config import ROOT, TZ
+    from diarizer.config import ROOT, TZ, data_path, transcripts_dir
     from diarizer.identification import split_markdown
 
 
 # Find and optionally correct transcript mtimes to match their recording dates.
 def sync_md_dates(root, *, folder=None, apply=False):
     root = Path(root).resolve()
-    text_root = (root / "Text").resolve()
+    text_root = transcripts_dir(root).resolve()
     target_dir = Path(folder).resolve() if folder else text_root
     if not target_dir.is_relative_to(text_root) or not target_dir.is_dir():
         raise ValueError("Choose a folder inside " + str(text_root))
@@ -55,7 +55,7 @@ def sync_md_dates(root, *, folder=None, apply=False):
                     continue
                 if journal is None:
                     stamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%f%z")
-                    log = root / "work/logs/migrations" / f"md-dates-{stamp}.jsonl"
+                    log = data_path("logs", "migrations", f"md-dates-{stamp}.jsonl", root=root)
                     log.parent.mkdir(parents=True, exist_ok=True)
                     journal = log.open("x", encoding="utf-8")
                     result["journal"] = str(log.relative_to(root))
@@ -80,7 +80,7 @@ def sync_md_dates(root, *, folder=None, apply=False):
 # Run the transcript date sync with the chosen folder and apply options.
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--folder", help="Optional subfolder under Text/")
+    ap.add_argument("--folder", help="Optional subfolder in the transcript tree")
     ap.add_argument("--apply", action="store_true", help="Update mtime on MD files")
     args = ap.parse_args()
     res = sync_md_dates(ROOT, folder=args.folder, apply=args.apply)
