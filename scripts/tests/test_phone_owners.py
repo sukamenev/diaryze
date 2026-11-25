@@ -153,7 +153,7 @@ class PhoneOwnerTests(unittest.TestCase):
     # Check that the archive migration updates the manifest and preserves the recording mtime.
     def test_archive_migration_updates_manifest_and_preserves_recording_mtime(self):
         raw = self.legacy().replace(b"audio: Phone/2025/call.m4a\n", b"")
-        path = self.root / "Data/Text" / (self.item["audio_rel"] + ".md")
+        path = self.root / "00_Diaryze_Data/Text" / (self.item["audio_rel"] + ".md")
         path.parent.mkdir(parents=True)
         path.write_bytes(raw)
         before_mtime = path.stat().st_mtime_ns

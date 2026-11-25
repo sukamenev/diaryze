@@ -9,11 +9,17 @@ from pathlib import Path
 
 
 ROOT = os.getcwd()
+DATA_DIR = "00_Diaryze_Data"
+LEGACY_DATA_DIR = "Data"
 
 
-# Resolve a path under the archive's generated data directory.
+# Use the canonical data directory, or the existing directory of a legacy archive.
 def data_path(*parts, root=None):
-    return Path(ROOT if root is None else root).joinpath("Data", *parts)
+    root = Path(ROOT if root is None else root)
+    current = root / DATA_DIR
+    legacy = root / LEGACY_DATA_DIR
+    directory = legacy if not current.exists() and legacy.is_dir() else current
+    return directory.joinpath(*parts)
 
 
 # Use the new transcript tree, or the existing tree in an older archive.
@@ -88,7 +94,9 @@ AGY_SHARED = ("antigravity-oauth-token", "settings.json", "installation_id")
 CUSTOM_AGENT_NAME = "audio-reader"
 
 
-EXCLUDED_DIRS = {"text", "data", "docs", "scripts", "work", ".work", "prompts", "promts", ".git", ".agents", ".codex", ".aws", ".bin", "__pycache__", "@eadir", ".venv"}
+EXCLUDED_DIRS = {DATA_DIR.lower(), LEGACY_DATA_DIR.lower(), "text", "docs", "scripts",
+                 "work", ".work", "prompts", "promts", ".git", ".agents", ".codex",
+                 ".aws", ".bin", "__pycache__", "@eadir", ".venv"}
 
 AUDIO_EXTENSIONS = {
     ".3g2", ".3gp", ".aac", ".ac3", ".adts", ".aif", ".aifc", ".aiff",

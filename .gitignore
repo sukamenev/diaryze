@@ -6,6 +6,7 @@ dist/
 *.egg-info/
 /Text/
 /Data/
+/00_Diaryze_Data/
 /work/
 /Phone/
 /Recordings/

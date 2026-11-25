@@ -29,8 +29,8 @@ class FindTranscriptsTests(unittest.TestCase):
     def test_filters_by_duration_words_spam_bot_person_and_date(self):
         with tempfile.TemporaryDirectory(prefix="find-md-test-") as tmp:
             root = Path(tmp)
-            d25 = root / "Data/Text/Phone/2025"
-            d26 = root / "Data/Text/Phone/2026"
+            d25 = root / "00_Diaryze_Data/Text/Phone/2025"
+            d26 = root / "00_Diaryze_Data/Text/Phone/2026"
             d25.mkdir(parents=True)
             d26.mkdir(parents=True)
             (root / "Phone").mkdir()
@@ -60,7 +60,7 @@ class FindTranscriptsTests(unittest.TestCase):
             self.assertEqual(len(search_transcripts(root, max_words=2)), 1)
             self.assertEqual(len(search_transcripts(root, min_spam=0.7)), 1)
             self.assertEqual(len(search_transcripts(root, only_bot=True)), 1)
-            self.assertEqual(search_transcripts(root, person="orlova_viktoria")[0]["md"], "Data/Text/Phone/2026/long_friend.m4a.md")
+            self.assertEqual(search_transcripts(root, person="orlova_viktoria")[0]["md"], "00_Diaryze_Data/Text/Phone/2026/long_friend.m4a.md")
             self.assertEqual(len(search_transcripts(root, folder="Phone/2025")), 1)
             self.assertEqual(len(search_transcripts(root, direction="in")), 1)
             self.assertEqual(len(search_transcripts(root, text_query="гулять")), 1)

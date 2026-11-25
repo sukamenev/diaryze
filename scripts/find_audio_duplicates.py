@@ -11,10 +11,10 @@ from pathlib import Path
 
 if __package__:
     from .diarizer.archive import is_audio_candidate, is_excluded_source_dir
-    from .diarizer.config import EXCLUDED_FILES, ROOT, data_path
+    from .diarizer.config import DATA_DIR, EXCLUDED_FILES, ROOT, data_path
 else:
     from diarizer.archive import is_audio_candidate, is_excluded_source_dir
-    from diarizer.config import EXCLUDED_FILES, ROOT, data_path
+    from diarizer.config import DATA_DIR, EXCLUDED_FILES, ROOT, data_path
 
 
 # Capture file metadata to detect changes during the duplicate scan.
@@ -99,7 +99,7 @@ def audit(root):
 # Run a read-only duplicate audit and write its reports.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', help='New report directory (default: Data/reports/duplicates/<timestamp>)')
+    parser.add_argument('--output', help=f'New report directory (default: {DATA_DIR}/reports/duplicates/<timestamp>)')
     args = parser.parse_args()
     groups, summary = audit(ROOT)
     stamp = datetime.now().astimezone().strftime('%Y%m%dT%H%M%S%z')

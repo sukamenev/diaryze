@@ -133,12 +133,12 @@ speakers:
     def test_apply_updates_index_and_second_run_is_a_noop(self):
         with tempfile.TemporaryDirectory(prefix="identity-migration-test-") as tmp:
             root = Path(tmp)
-            path = root / "Data/Text/Recordings/test.wav.md"
+            path = root / "00_Diaryze_Data/Text/Recordings/test.wav.md"
             path.parent.mkdir(parents=True)
             path.write_bytes(self.sample())
-            data = root / "Data"
+            data = root / "00_Diaryze_Data"
             (data / "people.yaml").write_text(yaml.safe_dump({"people": PEOPLE}))
-            record = {"audio": "Recordings/test.wav", "text": "Data/Text/Recordings/test.wav.md",
+            record = {"audio": "Recordings/test.wav", "text": "00_Diaryze_Data/Text/Recordings/test.wav.md",
                       "status": "done", "schema_version": "1.0", "sha256": "a" * 64,
                       "created_at": "original date", "model": "original model"}
             manifest = data / "manifest.jsonl"
@@ -232,8 +232,8 @@ speakers:
     def test_sync_md_dates_sets_mtime_from_recorded_at_and_filename_idempotently(self):
         with tempfile.TemporaryDirectory(prefix="md-dates-test-") as tmp:
             root = Path(tmp)
-            p1 = root / "Data/Text/Phone/2024/call1.m4a.md"
-            p2 = root / "Data/Text/Phone/2026/1770573484-1-+70000000102.m4a.md"
+            p1 = root / "00_Diaryze_Data/Text/Phone/2024/call1.m4a.md"
+            p2 = root / "00_Diaryze_Data/Text/Phone/2026/1770573484-1-+70000000102.m4a.md"
             p1.parent.mkdir(parents=True)
             p2.parent.mkdir(parents=True)
             p1.write_text("---\nschema_version: '1.0'\nrecorded_at: '2024-06-04T13:18:54'\n---\n\n## Речь\n", encoding="utf-8")

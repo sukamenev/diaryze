@@ -37,7 +37,7 @@ class TemporaryArchive(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory(prefix="diarizer-test-")
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name).resolve()
-        self.manifest = self.root / "Data/manifest.jsonl"
+        self.manifest = self.root / "00_Diaryze_Data/manifest.jsonl"
         patch = mock.patch.object(config, "ROOT", str(self.root))
         patch.start()
         self.addCleanup(patch.stop)
@@ -49,7 +49,7 @@ class TemporaryArchive(unittest.TestCase):
         source.write_bytes(b"synthetic input: " + name.encode())
         return {
             "audio_abs": str(source), "audio_rel": str(source.relative_to(self.root)),
-            "clean_abs": str(source), "target_md": str(self.root / "Data/Text/Phone/2026" / (name + ".md")),
+            "clean_abs": str(source), "target_md": str(self.root / "00_Diaryze_Data/Text/Phone/2026" / (name + ".md")),
             "sha256": archive.sha256_file(source), "duration_ms": duration,
             "dt": None, "direction": None, "contact": "Test", "phones": [],
         }
@@ -60,7 +60,8 @@ class ArchiveTests(TemporaryArchive):
     def test_whole_archive_scan_excludes_text_services_and_nonaudio(self):
         wanted = {"Phone/2019/call.wav", "Phone/2025/call.m4a", "Recordings/mono.mp3",
                   "Smartphone/voice.opus", "root.amr", "Phone/.контакт.m4a", "Phone/raw"}
-        excluded = {"Text/Phone/fake.wav", "Data/Text/Phone/fake.wav", "docs/example.wav", "scripts/fixture.wav", "Data/voice_samples/sample.flac",
+        excluded = {"Text/Phone/fake.wav", "Data/old.wav", "00_Diaryze_Data/Text/Phone/fake.wav",
+                    "docs/example.wav", "scripts/fixture.wav", "00_Diaryze_Data/voice_samples/sample.flac",
                     ".agents/sample.m4a", "Phone/.Trash/deleted.m4a", "Phone/.nomedia"}
         for name in wanted | excluded:
             path = self.root / name
@@ -95,9 +96,22 @@ class ArchiveTests(TemporaryArchive):
         with config.use_archive(checkout), self.assertRaisesRegex(ValueError, "Service folder"):
             archive.resolve_source_dir(".")
 
+    # Keep finding transcripts and writing catalogs in an existing Data archive.
+    def test_legacy_data_directory_remains_usable(self):
+        item = self.item()
+        legacy = self.root / "Data"
+        md = legacy / "Text" / (item["audio_rel"] + ".md")
+        md.parent.mkdir(parents=True)
+        md.write_text(f'---\nsha256: "{item["sha256"]}"\n---\n', encoding="utf-8")
+        archive.init_catalogs()
+        self.assertEqual(config.transcripts_dir(), legacy / "Text")
+        self.assertEqual(archive.scan_pending(), [])
+        self.assertTrue((legacy / "people.yaml").is_file())
+        self.assertFalse((self.root / "00_Diaryze_Data").exists())
+
     # Check that an explicit source folder cannot escape the archive or name a service path.
     def test_source_folder_rejects_service_directories_and_escape(self):
-        for name in ("Text", "docs", "scripts"):
+        for name in ("Text", "docs", "scripts", "00_Diaryze_Data"):
             (self.root / name).mkdir()
             with self.subTest(folder=name), self.assertRaises(ValueError):
                 archive.scan_pending(name)
@@ -159,7 +173,7 @@ class PipelineTests(TemporaryArchive):
         scope = self.root / "Phone/2026/other"
         (scope / ".owner").write_text("type: recorder\n", encoding="utf-8")
         (self.root / "Phone/.owner").write_text("type: phone\nowner: ivanov_ivan\n", encoding="utf-8")
-        reference = self.root / "Data/voice_samples/ivanov_ivan/phone/confirmed/2025-03-14_01.flac"
+        reference = self.root / "00_Diaryze_Data/voice_samples/ivanov_ivan/phone/confirmed/2025-03-14_01.flac"
         reference.parent.mkdir(parents=True)
         reference.write_bytes(b"approved fixture")
         reply = "\n".join(f"=== ITEM {i} ===\n{REPLY}" for i in (1, 2))
@@ -352,7 +366,7 @@ class PipelineTests(TemporaryArchive):
         self.assertIn("petrov_ivan", people)
         self.assertEqual(people["petrov_ivan"]["name"], "Иван Петров")
         self.assertEqual(people["petrov_ivan"]["phones"], ["+70000000104"])
-        disk_people = yaml.safe_load((self.root / "Data/people.yaml").read_text(encoding="utf-8"))["people"]
+        disk_people = yaml.safe_load((self.root / "00_Diaryze_Data/people.yaml").read_text(encoding="utf-8"))["people"]
         self.assertIn("petrov_ivan", disk_people)
         md_meta = yaml.safe_load(Path(item["target_md"]).read_text(encoding="utf-8").split("---", 2)[1])
         self.assertEqual(md_meta["speakers"]["Иван"]["person"], "petrov_ivan")
@@ -376,7 +390,7 @@ class PipelineTests(TemporaryArchive):
         self.assertIn("beeline", orgs)
         self.assertEqual(orgs["beeline"]["name"], "Билайн")
         self.assertEqual(orgs["beeline"]["phones"], ["+78000000112"])
-        disk_orgs = yaml.safe_load((self.root / "Data/orgs.yaml").read_text(encoding="utf-8"))["orgs"]
+        disk_orgs = yaml.safe_load((self.root / "00_Diaryze_Data/orgs.yaml").read_text(encoding="utf-8"))["orgs"]
         self.assertIn("beeline", disk_orgs)
         md_meta = yaml.safe_load(Path(item["target_md"]).read_text(encoding="utf-8").split("---", 2)[1])
         self.assertEqual(md_meta["speakers"]["Робот"]["org"], "beeline")
@@ -467,7 +481,7 @@ class CheckpointTests(TemporaryArchive):
     def test_resumes_with_the_same_voice_sample(self):
         item = self.long_item()
         label = "ivanov_ivan/phone/confirmed/2025-03-14_01.flac"
-        reference = self.root / "Data/voice_samples" / label
+        reference = self.root / "00_Diaryze_Data/voice_samples" / label
         reference.parent.mkdir(parents=True)
         reference.write_bytes(b"approved fixture")
         self.save_first_part(checkpoints.LongCheckpoint(item), voice_sample=label)

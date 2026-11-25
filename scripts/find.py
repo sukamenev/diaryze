@@ -10,11 +10,11 @@ import sys
 import yaml
 
 if __package__:
-    from .diarizer.config import ROOT, TS_LINE_RE, transcripts_dir
+    from .diarizer.config import DATA_DIR, LEGACY_DATA_DIR, ROOT, TS_LINE_RE, transcripts_dir
     from .diarizer.markdown import TranscriptFile
     from .diarizer.owners import find_folder_owner
 else:
-    from diarizer.config import ROOT, TS_LINE_RE, transcripts_dir
+    from diarizer.config import DATA_DIR, LEGACY_DATA_DIR, ROOT, TS_LINE_RE, transcripts_dir
     from diarizer.markdown import TranscriptFile
     from diarizer.owners import find_folder_owner
 
@@ -70,7 +70,7 @@ def _resolve_search_dir(text_root: Path, folder: str | None) -> Path:
     if not folder or folder == ".":
         return text_root
     cleaned = folder.strip().lstrip("/")
-    for prefix in ("Data/Text", "Text"):
+    for prefix in (f"{DATA_DIR}/Text", f"{LEGACY_DATA_DIR}/Text", "Text"):
         if cleaned == prefix:
             return text_root
         if cleaned.startswith(prefix + "/"):

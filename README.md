@@ -17,7 +17,7 @@ python -m pip install ./diaryze
 diaryze --dry-run
 ```
 
-Git names the checkout `diaryze` by default. You can pass a different destination name to `git clone` and use it in the paths above. Keep `Data/` for archive data. Diaryze skips the checkout when it looks for recordings.
+Git names the checkout `diaryze` by default. You can pass a different destination name to `git clone` and use it in the paths above. Keep `00_Diaryze_Data/` for archive data. Diaryze skips the checkout when it looks for recordings.
 
 From the archive root, try processing a few recordings.
 
@@ -41,21 +41,21 @@ In the author's runs, **5 hours of Antigravity quota covered roughly 18–26 hou
 
 ## What the archive contains
 
-- `Data/Text/` mirrors the source paths. `Phone/2025/call.m4a` becomes `Data/Text/Phone/2025/call.m4a.md`.
-- `Data/people.yaml` and `Data/orgs.yaml` hold the catalogs. `Data/manifest.jsonl` records processing history. Existing archives can still use any of these files in `docs/`.
-- `Data/voice_samples/<person>/<phone|recorder>/confirmed/YYYY-MM-DD_NN.flac` holds approved voice references, independently of the source calls.
-- `Data/voice_samples/<person>/<phone|recorder>/candidate/` holds clips awaiting review.
-- `Data/logs/` holds diagnostics, which can contain model responses.
-- `Data/.work/checkpoints/` holds accepted long-recording parts until the final transcript is published.
-- `Data/reports/` holds archive-specific reports and benchmark results.
+- `00_Diaryze_Data/Text/` mirrors the source paths. `Phone/2025/call.m4a` becomes `00_Diaryze_Data/Text/Phone/2025/call.m4a.md`.
+- `00_Diaryze_Data/people.yaml` and `00_Diaryze_Data/orgs.yaml` hold the catalogs. `00_Diaryze_Data/manifest.jsonl` records processing history.
+- `00_Diaryze_Data/voice_samples/<person>/<phone|recorder>/confirmed/YYYY-MM-DD_NN.flac` holds approved voice references, independently of the source calls.
+- `00_Diaryze_Data/voice_samples/<person>/<phone|recorder>/candidate/` holds clips awaiting review.
+- `00_Diaryze_Data/logs/` holds diagnostics, which can contain model responses.
+- `00_Diaryze_Data/.work/checkpoints/` holds accepted long-recording parts until the final transcript is published.
+- `00_Diaryze_Data/reports/` holds archive-specific reports and benchmark results.
 
-Originals stay in place. `agy` sends the audio and transcription context to the model provider.
+An archive with the older `Data/` directory can continue using it. Catalogs and manifests in legacy `docs/` are also supported. Originals stay in place. `agy` sends the audio and transcription context to the model provider.
 
 ## Identify speakers
 
 Processing creates missing catalogs. To fill them first, run `diaryze --root "/path/to/recordings" --init` and edit the YAML. Existing catalogs are preserved.
 
-Example card in `Data/people.yaml`.
+Example card in `00_Diaryze_Data/people.yaml`.
 
 ```yaml
 schema_version: "1.0"
@@ -78,7 +78,7 @@ diaryze links speakers using filenames, phone numbers, catalog matches, and spee
 
 ### Phone owner voice references
 
-On the first run for phone folders without a known owner's sample, diaryze compares short calls with different contacts inside the selected folder and cuts up to three candidate clips per `.owner` folder. It can find `.owner` in a parent directory up to the archive root. It stops before transcription and prints the files under `Data/voice_samples/<person>/phone/candidate/` for listening.
+On the first run for phone folders without a known owner's sample, diaryze compares short calls with different contacts inside the selected folder and cuts up to three candidate clips per `.owner` folder. It can find `.owner` in a parent directory up to the archive root. It stops before transcription and prints the files under `00_Diaryze_Data/voice_samples/<person>/phone/candidate/` for listening.
 
 Listen to the clips in `candidate/` and move the best FLAC to the adjacent `confirmed/` folder. Leave its JSON sidecar in `candidate/`. A rerun before approval shows the existing candidates. Once you move a clip, diaryze verifies it, saves its provenance, and continues with transcription. For each call, it uses one reference from the closest date in either direction. A phone clip wins ties. If the call date is unavailable, the most recent dated reference is used.
 
@@ -111,7 +111,7 @@ python3 /path/to/diaryze/scripts/find.py --root "/path/to/recordings" --folder P
 | [find_audio_duplicates.py](scripts/find_audio_duplicates.py) | Report byte-identical audio files. |
 | [audit_recording_dates.py](scripts/audit_recording_dates.py) | Compare dates from filenames, metadata, and file times. Changing audio timestamps requires a plan and `--apply`. |
 | [sync_md_dates.py](scripts/sync_md_dates.py) | Check transcript file times against recording dates. Use `--apply` to sync. |
-| [swap_speakers.py](scripts/swap_speakers.py) | Swap two speaker labels in the timestamped turns of one transcript. Run with `"Data/Text/recording.m4a.md" "Alice" "Bob"` to preview. Add `--apply` to save. |
+| [swap_speakers.py](scripts/swap_speakers.py) | Swap two speaker labels in the timestamped turns of one transcript. Run with `"00_Diaryze_Data/Text/recording.m4a.md" "Alice" "Bob"` to preview. Add `--apply` to save. |
 | [relink_catalog_speakers.py](scripts/relink_catalog_speakers.py) | Match unlinked speakers to existing cards. |
 | [migrate_identification.py](scripts/migrate_identification.py), [migrate_phone_owners.py](scripts/migrate_phone_owners.py), [migrate_catalog_fields.py](scripts/migrate_catalog_fields.py) | Preview transcript migrations. Use `--apply` to write changes. |
 

@@ -42,7 +42,7 @@ class VoiceSampleTests(unittest.TestCase):
 
     # Place an approved fixture where references are discovered automatically.
     def sample(self, filename, channel="phone"):
-        path = self.root / "Data" / "voice_samples" / PERSON / channel / "confirmed" / filename
+        path = self.root / "00_Diaryze_Data" / "voice_samples" / PERSON / channel / "confirmed" / filename
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"approved fixture")
         return path
@@ -164,7 +164,7 @@ class VoiceSampleTests(unittest.TestCase):
         self.assertEqual(len(candidates), 3)
         item = archive.scan_pending("Phone/2021")[0]
         self.assertIsNone(voice_samples.owner_reference(item, PEOPLE))
-        pending = self.root / "Data/voice_samples" / PERSON / "phone/candidate"
+        pending = self.root / "00_Diaryze_Data/voice_samples" / PERSON / "phone/candidate"
         confirmed = pending.with_name("confirmed")
         self.assertTrue(all(path.parent == pending for path in candidates))
         provenance = {path.name: json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
@@ -200,7 +200,7 @@ class VoiceSampleTests(unittest.TestCase):
 
     # Confirm one candidate without removing candidates from a different source folder.
     def test_approves_candidate_without_affecting_other_reviews(self):
-        folder = self.root / "Data/voice_samples" / PERSON / "phone/candidate"
+        folder = self.root / "00_Diaryze_Data/voice_samples" / PERSON / "phone/candidate"
         folder.mkdir(parents=True)
         clip = folder / "2025-05-10_01.flac"
         other = folder / "2025-05-10_02.flac"
