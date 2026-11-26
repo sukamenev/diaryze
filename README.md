@@ -1,4 +1,4 @@
-# diaryze
+# Diaryze
 
 English · [Русский](README.ru.md)
 
@@ -25,7 +25,7 @@ From the archive root, try processing a few recordings.
 diaryze --workers 2 --limit 5
 ```
 
-diaryze uses the current directory as the archive root by default. Use `diaryze --root "/path/to/recordings"` from elsewhere. Use `--folder Phone/2025` to limit both transcription and candidate preparation to a folder within the archive. With PyYAML already installed, `python3 /path/to/diaryze/diaryze.py` accepts the same options.
+Diaryze uses the current directory as the archive root by default. Use `diaryze --root "/path/to/recordings"` from elsewhere. Use `--folder Phone/2025` to limit both transcription and candidate preparation to a folder within the archive. With PyYAML already installed, `python3 /path/to/diaryze/diaryze.py` accepts the same options.
 
 The command-line interface is in English by default. Use `--ui ru` for Russian help, progress and prompts, or `--ui en` to select English explicitly. Transcript language and summary rules are independent of the interface.
 
@@ -35,7 +35,7 @@ If you have a checkout elsewhere, you can put a symlink named `diaryze` in the a
 python3 ./diaryze/diaryze.py --folder Phone/2025 --dry-run
 ```
 
-`--models model-a,model-b` sets the full model chain. Pass one name to use one model. `--model` sets the first model and keeps the configured fallbacks. diaryze batches short recordings, splits long ones with overlap, and maps timestamps back to the original. Reruns skip transcripts with a matching source hash. An interrupted long recording resumes from saved parts: the checkpoint is tied to the audio hash and part layout and is removed after the transcript is published.
+`--models model-a,model-b` sets the full model chain. Pass one name to use one model. `--model` sets the first model and keeps the configured fallbacks. Diaryze batches short recordings, splits long ones with overlap, and maps timestamps back to the original. Reruns skip transcripts with a matching source hash. An interrupted long recording resumes from saved parts: the checkpoint is tied to the audio hash and part layout and is removed after the transcript is published.
 
 In the author's runs, **5 hours of Antigravity quota covered roughly 18–26 hours of recorded conversations**. Throughput varies with models, recordings, retries, and worker count.
 
@@ -74,16 +74,16 @@ owner: ivanov_ivan
 label: Иван
 ```
 
-diaryze links speakers using filenames, phone numbers, catalog matches, and speech. With enough evidence, it adds a card after checking known names and numbers. Review automatic links and keep card IDs stable because transcripts refer to them. Unknown speakers have `person: null`. One-off participants can use `temp: true` without a card.
+Diaryze links speakers using filenames, phone numbers, catalog matches, and speech. With enough evidence, it adds a card after checking known names and numbers. Review automatic links and keep card IDs stable because transcripts refer to them. Unknown speakers have `person: null`. One-off participants can use `temp: true` without a card.
 
 ### Phone owner voice references
 
-On the first run for phone folders without a known owner's sample, diaryze compares short calls with different contacts inside the selected folder and cuts up to three candidate clips per `.owner` folder. It can find `.owner` in a parent directory up to the archive root. It stops before transcription and prints the files under `00_Diaryze_Data/voice_samples/<person>/phone/candidate/` for listening.
+On the first run for phone folders without a known owner's sample, Diaryze compares short calls with different contacts inside the selected folder and cuts up to three candidate clips per `.owner` folder. It can find `.owner` in a parent directory up to the archive root. It stops before transcription and prints the files under `00_Diaryze_Data/voice_samples/<person>/phone/candidate/` for listening.
 
 Candidates can contain 5–20 seconds of clean speech from one speaker. Clips of at least 10 seconds are preferred when quality and identity evidence are comparable.
-A separate model request checks each extracted FLAC. If a second voice is heard, diaryze makes one attempt to shorten or shift the cut using up to five seconds of source audio on either side. It checks the new cut again. Only clips judged to contain one speaker reach the candidate folder.
+A separate model request checks each extracted FLAC. If a second voice is heard, Diaryze makes one attempt to shorten or shift the cut using up to five seconds of source audio on either side. It checks the new cut again. Only clips judged to contain one speaker reach the candidate folder.
 
-Listen to the clips in `candidate/` and move the best FLAC to the adjacent `confirmed/` folder. Leave its JSON sidecar in `candidate/`. A rerun before approval shows the existing candidates. Once you move a clip, diaryze verifies it, saves its provenance, and continues with transcription. For each call, it uses one reference from the closest date in either direction. A phone clip wins ties. If the call date is unavailable, the most recent dated reference is used.
+Listen to the clips in `candidate/` and move the best FLAC to the adjacent `confirmed/` folder. Leave its JSON sidecar in `candidate/`. A rerun before approval shows the existing candidates. Once you move a clip, Diaryze verifies it, saves its provenance, and continues with transcription. For each call, it uses one reference from the closest date in either direction. A phone clip wins ties. If the call date is unavailable, the most recent dated reference is used.
 
 `--prepare-voice-sample` prepares candidates for the selected folder’s owner without starting a transcription. Add a person ID to select one explicitly. `--approve-voice-sample "path/to/2025-03-14_01.flac"` confirms a clip, and `--reject-voice-sample "path/to/2025-03-14_01.flac"` discards its set.
 
@@ -93,13 +93,13 @@ The review prints instructions when clips are ready. If it cannot prepare any, i
 
 ## Audio recovery
 
-diaryze works on temporary copies. It uses FFmpeg to copy the first readable audio stream or decode it to WAV if copying fails. For a damaged AAC container such as an M4A missing `moov`, it tries [FAAD2](https://github.com/knik0/faad2) first, then remuxes surviving frames with FFmpeg. Install the shared library with `brew install faad2` on macOS or `sudo apt install libfaad2` on [Debian](https://packages.debian.org/trixie/libfaad2).
+Diaryze works on temporary copies. It uses FFmpeg to copy the first readable audio stream or decode it to WAV if copying fails. For a damaged AAC container such as an M4A missing `moov`, it tries [FAAD2](https://github.com/knik0/faad2) first, then remuxes surviving frames with FFmpeg. Install the shared library with `brew install faad2` on macOS or `sudo apt install libfaad2` on [Debian](https://packages.debian.org/trixie/libfaad2).
 
-If AAC recovery fails, diaryze can use `untrunc` on `PATH` with `-dst` support and a playable M4A or MP4 in the same folder. A reference from the same device and settings works best. Manual Docker use and build instructions are available upstream. [untrunc](https://github.com/anthwlock/untrunc#building)
+If AAC recovery fails, Diaryze can use `untrunc` on `PATH` with `-dst` support and a playable M4A or MP4 in the same folder. A reference from the same device and settings works best. Manual Docker use and build instructions are available upstream. [untrunc](https://github.com/anthwlock/untrunc#building)
 
-Recovered audio and the prepared stream must pass a full strict decode before transcription. If the provider still rejects media as empty, corrupted, or malformed, diaryze records `needs_recovery` instead of sending the same bytes to every model. A rejected batch is retried one file at a time so healthy recordings can finish.
+Recovered audio and the prepared stream must pass a full strict decode before transcription. If the provider still rejects media as empty, corrupted, or malformed, Diaryze records `needs_recovery` instead of sending the same bytes to every model. A rejected batch is retried one file at a time so healthy recordings can finish.
 
-If a file remains unreadable, diaryze skips transcription and records `needs_recovery` with the reason and source hash. Empty files and files without audio get `skipped`. After installing recovery tools, run `diaryze --retry-recovery` to include flagged files and damaged files skipped by earlier versions. Files tagged `needs_recovery` reenter the regular queue if their bytes change. Use `--no-faad` or `--no-untrunc` to disable a method.
+If a file remains unreadable, Diaryze skips transcription and records `needs_recovery` with the reason and source hash. Empty files and files without audio get `skipped`. After installing recovery tools, run `diaryze --retry-recovery` to include flagged files and damaged files skipped by earlier versions. Files tagged `needs_recovery` reenter the regular queue if their bytes change. Use `--no-faad` or `--no-untrunc` to disable a method.
 
 ## Search and maintain an archive
 
