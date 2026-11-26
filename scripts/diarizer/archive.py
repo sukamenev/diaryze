@@ -235,7 +235,7 @@ def is_excluded_dir(name: str) -> bool:
 # Recognize the Diaryze source tree independently of the checkout directory name.
 def _is_diaryze_checkout(path: Path) -> bool:
     return ((path / "pyproject.toml").is_file()
-            and (path / "scripts" / "diarize.py").is_file()
+            and ((path / "diaryze.py").is_file() or (path / "scripts" / "diarize.py").is_file())
             and (path / "scripts" / "diarizer" / "cli.py").is_file())
 
 

@@ -25,14 +25,14 @@ From the archive root, try processing a few recordings.
 diaryze --workers 2 --limit 5
 ```
 
-diaryze uses the current directory as the archive root by default. Use `diaryze --root "/path/to/recordings"` from elsewhere. Use `--folder Phone/2025` to limit both transcription and candidate preparation to a folder within the archive. With PyYAML already installed, `python3 /path/to/diaryze/scripts/diarize.py` accepts the same options.
+diaryze uses the current directory as the archive root by default. Use `diaryze --root "/path/to/recordings"` from elsewhere. Use `--folder Phone/2025` to limit both transcription and candidate preparation to a folder within the archive. With PyYAML already installed, `python3 /path/to/diaryze/diaryze.py` accepts the same options.
 
 The command-line interface is in English by default. Use `--ui ru` for Russian help, progress and prompts, or `--ui en` to select English explicitly. Transcript language and summary rules are independent of the interface.
 
 If you have a checkout elsewhere, you can put a symlink named `diaryze` in the archive. With PyYAML installed, the direct script command works from the archive root:
 
 ```bash
-python3 diaryze/scripts/diarize.py --folder Phone/2025 --dry-run
+python3 ./diaryze/diaryze.py --folder Phone/2025 --dry-run
 ```
 
 `--models model-a,model-b` sets the full model chain. Pass one name to use one model. `--model` sets the first model and keeps the configured fallbacks. diaryze batches short recordings, splits long ones with overlap, and maps timestamps back to the original. Reruns skip transcripts with a matching source hash. An interrupted long recording resumes from saved parts: the checkpoint is tied to the audio hash and part layout and is removed after the transcript is published.

@@ -85,21 +85,23 @@ class ArchiveTests(TemporaryArchive):
 
     # Ignore embedded checkouts by their source files and allow ordinary folders with the project name.
     def test_skips_a_checkout_with_any_name(self):
-        checkout = self.root / "tools checkout"
-        for name in ("pyproject.toml", "scripts/diarize.py", "scripts/diarizer/cli.py", "LICENSE", "fixtures/test.wav"):
-            path = checkout / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"fixture")
+        checkouts = (self.root / "tools checkout", self.root / "legacy checkout")
+        for checkout, launcher in zip(checkouts, ("diaryze.py", "scripts/diarize.py"), strict=True):
+            for name in ("pyproject.toml", launcher, "scripts/diarizer/cli.py", "fixtures/test.wav"):
+                path = checkout / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fixture")
         recordings = self.root / "diaryze"
         recordings.mkdir()
         (recordings / "call.wav").write_bytes(b"audio fixture")
 
         self.assertEqual([item["audio_rel"] for item in archive.scan_pending()], ["diaryze/call.wav"])
-        for folder in (checkout, checkout / "fixtures"):
-            with self.subTest(folder=folder), self.assertRaisesRegex(ValueError, "Service folder"):
-                archive.resolve_source_dir(str(folder))
-        with config.use_archive(checkout), self.assertRaisesRegex(ValueError, "Service folder"):
-            archive.resolve_source_dir(".")
+        for checkout in checkouts:
+            for folder in (checkout, checkout / "fixtures"):
+                with self.subTest(folder=folder), self.assertRaisesRegex(ValueError, "Service folder"):
+                    archive.resolve_source_dir(str(folder))
+            with config.use_archive(checkout), self.assertRaisesRegex(ValueError, "Service folder"):
+                archive.resolve_source_dir(".")
 
     # Keep finding transcripts and writing catalogs in an existing Data archive.
     def test_legacy_data_directory_remains_usable(self):
