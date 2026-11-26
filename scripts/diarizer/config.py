@@ -137,6 +137,7 @@ EXCLUDED_FILES = {".nomedia", ".ds_store", "thumbs.db", ".owner"}
 
 
 VALID_SOURCES = {"speech", "audio", "filename", "user"}
+SPEECH_EVIDENCE_PRIORITY = {"context": 1, "voice_sample": 2, "name": 3}
 
 
 TS_LINE_RE = re.compile(

@@ -357,6 +357,30 @@ class PipelineTests(TemporaryArchive):
         self.assertEqual(meta["speakers"]["Известный"]["person"], "known")
         self.assertEqual(meta["identification"], "partial")
 
+    # Check that a spoken name replaces context and survives a later metadata-only reply.
+    def test_long_recording_preserves_strongest_evidence_for_the_same_identity(self):
+        item = self.item(duration=30000)
+        item["parts"] = [
+            {"part": number, "path": f"part{number}.wav", "duration_ms": 10000,
+             "offset_ms": offset}
+            for number, offset in enumerate((0, 10000, 20000), 1)
+        ]
+        person = {"person": "known", "source": "speech", "evidence": "context", "note": "По содержанию."}
+        observations = [
+            person,
+            dict(person, evidence="name", note="Назвал своё имя."),
+            {"person": "known", "source": "filename", "note": "Имя в файле."},
+        ]
+        responses = [
+            envelope("SPEAKERS_JSON: " + json.dumps({"Иван": speaker}) + "\n[00:00:01.00] **Иван** Привет.")
+            for speaker in observations
+        ]
+        with mock.patch.object(pipeline, "run_agy", side_effect=responses), \
+                mock.patch.object(pipeline, "agy_forget"), contextlib.redirect_stdout(io.StringIO()):
+            pipeline.process_long_item(item, self.args(), {"known": {"name": "Иван"}}, {}, pipeline.Stats())
+        header = yaml.safe_load(Path(item["target_md"]).read_text().split("---", 2)[1])
+        self.assertEqual(header["speakers"]["Иван"], observations[1])
+
     # Check that a filename contact is registered once and reused on later encounters.
     def test_auto_registers_new_named_contact_from_filename_without_duplicating(self):
         item = self.item("Иван Петров_+70000000104_2026-08-01_12-00-00_incoming.m4a")

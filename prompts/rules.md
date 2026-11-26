@@ -10,8 +10,10 @@ In SPEAKERS_JSON, use short, unique, readable speaker keys instead of S1/S2:
 - Only if two speakers in the same recording share a first name, distinguish the non-owner /
   second speaker by surname or full name (e.g. Сергей vs Сергей Смирнов, Антон vs
   Соколов / Соколов Антон, or Имя 2 if surname is unknown).
-- If no name is known, use a concise readable role or label (e.g. Оператор,
-  Врач, Курьер, Робот, Собеседник, Голос 1, Голос 2).
+- If no name is known, use the shortest readable role that distinguishes the voice.
+  Prefer one word (e.g. Оператор, Врач, Курьер, Робот, Собеседник). Use Сотрудник
+  instead of Сотрудник центра поддержки. Add a second word or a number only to
+  distinguish voices when needed (e.g. Голос 1, Голос 2).
 - Never use "?" or "unknown" as a key in SPEAKERS_JSON. Use **?** in utterance lines
   only when an individual utterance cannot be reliably assigned to any audible voice.
 One voice means just one speaker key, except that a known phone owner is also a call
@@ -44,10 +46,21 @@ For each speaker, set:
   yet listed, set a concise GOST 7.79-2000 org key (e.g. `beeline`, `sberbank`) AND set `label`
   to its readable Russian name (e.g. `Билайн`) so it can be auto-registered once; set `source`
   to `"speech"` or `"filename"`. Leave `org` omitted if the organization is unknown.
-- source: "speech" (confirmed by speech/context in the audio), "filename" (established
-  from filename/phone metadata or folder phone owner when speech does not indicate someone
-  else is using the phone), or "user" (when explicitly given).
+- source: "speech" (confirmed by what was said or by an approved voice reference),
+  "filename" (established from filename/phone metadata or folder owner when the
+  audio does not contradict it), or "user" (when explicitly given).
   Omit source if neither person nor org is linked.
+- evidence: for a linked person or robot organization with source: "speech",
+  use exactly one of the following, in this order for each speaker:
+  1) "name" when an audible name or nickname clearly identifies that voice
+     (or a robot's organization names itself). A third-party mention alone does
+     not link the name to a voice.
+  2) "voice_sample" for a clear match to the approved reference supplied for this
+     recording when no reliable spoken name identifies the voice.
+  3) "context" when what is said identifies the speaker and neither of the above
+     applies. Briefly state the clue in note. A role, contact name in the filename,
+     call direction, or folder owner alone is not evidence from speech.
+  Omit evidence for other sources and unlinked identities.
 - temp: true ONLY for clearly one-off/transient strangers (courier, call-center operator,
   robot, taxi dispatcher, random wrong number) who do not need a catalog card.
 - nicknames: optional list of strings, ONLY for an identified non-temporary person

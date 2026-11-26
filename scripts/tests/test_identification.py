@@ -88,6 +88,35 @@ class IdentificationTests(unittest.TestCase):
         self.assertEqual(meta["speakers"], {})
 
 
+    # Check rendered evidence and reject claims that conflict with the recorded source.
+    def test_speech_evidence_round_trips_and_checks_voice_sample_provenance(self):
+        item = {"audio_rel": "Phone/test.wav", "sha256": "a" * 64, "duration_ms": 5000}
+        lines = [(0, "Сергей", "Привет")]
+        exact_sample = "known_person/phone/confirmed/2025-05-12_01.flac"
+        for evidence, voice_sample in (("name", "none"), ("context", "none"), ("voice_sample", exact_sample)):
+            with self.subTest(evidence=evidence):
+                speaker = dict(CONFIRMED, evidence=evidence)
+                md = validate_and_render_md(dict(item, voice_sample=voice_sample), {"Сергей": speaker},
+                                            lines, False, "model", PEOPLE, ORGS)
+                self.assertEqual(yaml.safe_load(md.split("---", 2)[1])["speakers"]["Сергей"], speaker)
+
+        invalid = (
+            (dict(CONFIRMED, evidence=["name"]), "none"),
+            (dict(CONFIRMED, source="filename", evidence="context"), "none"),
+            (dict(CONFIRMED, person=None, evidence="name"), "none"),
+            (dict(CONFIRMED, evidence="voice_sample"), "none"),
+            (dict(CONFIRMED, evidence="voice_sample"), exact_sample.replace("known_person", "other_person")),
+        )
+        for speaker, voice_sample in invalid:
+            with self.subTest(speaker=speaker, voice_sample=voice_sample):
+                recorded = dict(item, voice_sample=voice_sample)
+                with self.assertRaisesRegex(ValueError, "invalid evidence"):
+                    validate_and_render_md(recorded, {"Сергей": speaker}, lines, False, "model", PEOPLE, ORGS)
+                md = validate_and_render_md(recorded, {"Сергей": speaker}, lines, False, "model", PEOPLE, ORGS,
+                                            salvage=True)
+                self.assertNotIn("evidence", yaml.safe_load(md.split("---", 2)[1])["speakers"]["Сергей"])
+
+
 class MigrationTests(unittest.TestCase):
     # Build legacy Markdown with comments and transcript text for migration tests.
     def sample(self, newline=b"\n"):

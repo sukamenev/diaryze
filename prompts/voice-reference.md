@@ -7,6 +7,8 @@ Use a reference only to compare with the usual phone owner's voice. Exclude the 
 timings from transcription, summary and diarization. Another person may have
 used the phone. If the audible comparison conflicts with the owner metadata,
 explain the uncertainty in a brief note and keep an uncertain identity unlinked.
-For a clear match use source: "speech" and note: "Совпадение с образцом голоса".
+For a clear match use source: "speech". Use evidence: "name" if a spoken name
+reliably identifies the voice, otherwise use evidence: "voice_sample" with
+note: "Совпадение с образцом голоса".
 
 Voice references: $references

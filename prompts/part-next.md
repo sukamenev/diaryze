@@ -1,7 +1,7 @@
 $rules
 
 Keep the SAME speaker keys across all parts. Return SPEAKERS_JSON for voices in this
-part, preserving confirmed identity links and describing attempts for new voices.
+part, preserving confirmed identity links and their evidence. Assess new voices.
 Omit repetitions from the overlap and return only new utterances with LOCAL times
 from 00:00:00.00 through $part_duration. Do not add the part's global offset.
 If no speech is audible, use NO_SPEECH instead of utterance lines.

@@ -14,7 +14,7 @@ from .checkpoints import LongCheckpoint
 from .audio import prepare_audio_work, probe_duration_ms
 from .config import (
     BACKEND_RETRY_BASE_S, BACKEND_RETRY_MAX_S, NEEDS_RECOVERY, NO_RECOVERABLE_AUDIO, PART_REPAIR_ATTEMPTS,
-    REFUSAL_TEXT_PAT, SAFETY_ERR_PAT, TZ,
+    REFUSAL_TEXT_PAT, SAFETY_ERR_PAT, SPEECH_EVIDENCE_PRIORITY, TZ,
 )
 from .models import ModelAttempts, ModelCooldowns
 from .errors import MediaInputError, ModelRefused, ModelsUnavailable, ModelTaskFailed, classify_error, normalize_error, ui_error
@@ -257,8 +257,9 @@ def _restore_part(item, part, saved, model, people, orgs):
                 or not isinstance(speaker, str) or not isinstance(text, str)):
             raise ValueError('invalid line fields in saved part')
         lines.append((min(part['duration_ms'], max(0, local_ms)), speaker, text))
+    # Reconcile voice sample provenance when combining restored and new parts.
     validate_and_render_md(
-        dict(item, duration_ms=part['duration_ms'], summary=saved.get('summary')),
+        dict(item, duration_ms=part['duration_ms'], summary=saved.get('summary'), voice_sample=None),
         speakers, lines, not lines, model, people, orgs,
         salvage=bool(saved.get('warning')), register_catalog=None,
     )
@@ -310,7 +311,7 @@ def _request_part(item, part, args, people, orgs, stats, attempts, chain,
                 if plines:
                     candidate = (sp, plines, cur_model, item.get('summary'))
                 validate_and_render_md(
-                    dict(item, duration_ms=part['duration_ms']), {**(speakers or {}), **(sp or {})},
+                    dict(item, duration_ms=part['duration_ms']), _merge_part_speakers(speakers or {}, sp or {}),
                     plines, no_speech, cur_model, people, orgs,
                     register_catalog=register_catalog_entries,
                 )
@@ -337,6 +338,29 @@ def _request_part(item, part, args, people, orgs, stats, attempts, chain,
         sp, plines, used_model, item['summary'] = candidate
         warning = f"Часть {part['part']}: {exc} (сохранено с подрезанием)."
         return sp, plines, used_model, warning, model_idx, conv_id, home
+
+
+# Keep stronger evidence when a later part repeats the same speaker identity.
+def _merge_part_speakers(previous, current):
+    merged = {**previous, **current}
+    for key in previous.keys() & current.keys():
+        earlier, later = previous[key], current[key]
+        if not isinstance(earlier, dict) or not isinstance(later, dict):
+            continue
+        identity = (earlier.get("person"), earlier.get("org"))
+        if identity != (later.get("person"), later.get("org")) or later.get("source") == "user":
+            continue
+        old_evidence = earlier.get("evidence")
+        old_priority = SPEECH_EVIDENCE_PRIORITY.get(str(old_evidence), 0)
+        new_priority = SPEECH_EVIDENCE_PRIORITY.get(str(later.get("evidence")), 0)
+        if old_priority <= new_priority:
+            continue
+        info = dict(later, source="speech", evidence=old_evidence)
+        info.pop("note", None)
+        if "note" in earlier:
+            info["note"] = earlier["note"]
+        merged[key] = info
+    return merged
 
 
 # Combine accepted parts into one transcript with recording-relative timestamps.
@@ -388,6 +412,7 @@ def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) 
                 warning = saved.get('warning')
                 voice_sample = saved.get('voice_sample')
             else:
+                item['voice_sample'] = new_voice_sample if voice_samples <= {new_voice_sample} else None
                 sp, plines, used_model, warning, model_idx, conv_id, home = _request_part(
                     item, part, args, people, orgs, stats, attempts, chain,
                     model_idx, conv_id, home, speakers, reference)
@@ -398,7 +423,7 @@ def process_long_item(item: dict, args, people: dict, orgs: dict, stats: Stats) 
             if warning:
                 part_warnings.append(warning)
             if sp:
-                speakers = {**(speakers or {}), **sp}
+                speakers = _merge_part_speakers(speakers or {}, sp)
             for local_ms, speaker_id, txt in plines:
                 clamped_local = min(part['duration_ms'], max(0, local_ms))
                 abs_ms = clamped_local + part['offset_ms']

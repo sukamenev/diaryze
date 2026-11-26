@@ -7,7 +7,7 @@ import re
 import yaml
 
 from . import config
-from .config import TRANSCRIPT_SCHEMA_VERSION, TS_LINE_RE, TZ, VALID_SOURCES
+from .config import SPEECH_EVIDENCE_PRIORITY, TRANSCRIPT_SCHEMA_VERSION, TS_LINE_RE, TZ, VALID_SOURCES
 from .identification import identification_status
 from .owners import with_silent_phone_owner
 from .catalog_fields import duration_seconds, valid_summary, valid_spam_score
@@ -99,6 +99,20 @@ def _salvage_speaker_key(raw_key: str, existing: dict) -> str:
     return f"Голос {idx}"
 
 
+# Check that an evidence value supports the speaker's linked identity.
+def _valid_speech_evidence(info, voice_sample):
+    evidence = info["evidence"]
+    if (not isinstance(evidence, str) or evidence not in SPEECH_EVIDENCE_PRIORITY
+            or info.get("source") != "speech"):
+        return False
+    person = info.get("person")
+    if evidence == "voice_sample":
+        return person is not None and (
+            voice_sample is None or (voice_sample != "none" and voice_sample.split("/", 1)[0] == person)
+        )
+    return person is not None or (info.get("role") == "robot" and info.get("org") is not None)
+
+
 # Validate speaker links and timecodes and render the final Markdown.
 def validate_and_render_md(
     item: dict,
@@ -177,6 +191,10 @@ def validate_and_render_md(
             if not salvage:
                 raise ValueError(f"invalid source: {info['source']}")
             info.pop("source", None)
+        if "evidence" in info and not _valid_speech_evidence(info, item.get("voice_sample")):
+            if not salvage:
+                raise ValueError(f"invalid evidence for {sp_key}: {info['evidence']!r}")
+            info.pop("evidence")
         if "temp" in info:
             if not isinstance(info["temp"], bool):
                 if not salvage:
@@ -188,7 +206,7 @@ def validate_and_render_md(
         if "person" not in info and not is_robot_org:
             info["person"] = None
         ordered = {}
-        for k in ("person", "org", "role", "source", "temp", "label", "note"):
+        for k in ("person", "org", "role", "source", "evidence", "temp", "label", "note"):
             if k in info:
                 ordered[k] = info[k]
         for k, v in info.items():
