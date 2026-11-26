@@ -83,14 +83,15 @@ _RUSSIAN = {
     "No suitable voice sample found for {person}": "Не найден подходящий образец для {person}",
     "Voice sample approved: {sample}": "Образец подтверждён: {sample}",
     "Voice sample review rejected: {path}": "Набор кандидатов отклонён: {path}",
-    "Voice sample candidates": "Кандидаты на голосовой образец",
-    "Asking {model} to review {count} calls for voice samples": "Запрашиваю у {model} подбор образцов по звонкам ({count})",
-    "Voice sample result: {summary}": "Результат подбора образцов: {summary}",
-    "Call {number} ({status}) {path}: {detail}": "Звонок {number} ({status}) {path}: {detail}",
-    "audio read": "аудио прочитано",
-    "audio unavailable": "аудио недоступно",
-    "not attempted": "чтение не запускалось",
-    "Clips are already awaiting validation in {folder}.": "Клипы уже находятся в {folder} и ждут проверки.",
+    "Listen to the voice clips in {folder}/ ({count}).": "Прослушайте клипы в {folder}/ ({count}).",
+    "Move the best FLAC to the adjacent confirmed/ folder, leave the JSON files in place, and rerun transcription.":
+        "Перенесите лучший FLAC в соседнюю папку confirmed/, оставьте JSON на месте и снова запустите расшифровку.",
+    "Details in {path}": "Подробности в {path}",
+    "Selected clips are in {folder}. Start transcription to validate them.":
+        "Выбранные клипы уже в {folder}. Запустите расшифровку, чтобы подтвердить их.",
+    "The model could read {count} of {total} calls. Comparing voices needs at least two.":
+        "Модель прочитала {count} из {total} звонков. Для сравнения голоса нужны хотя бы два.",
+    "No suitable voice clip found in the reviewed calls.": "В проверенных звонках не найден подходящий образец голоса.",
     "Prepared {count} calls. Voice comparison needs two readable calls with different contacts.":
         "Подготовлено звонков: {count}. Для сравнения голоса нужны два читаемых звонка с разными контактами.",
     "The model returned an empty voice sample response": "Модель вернула пустой ответ на запрос образцов",
@@ -101,12 +102,6 @@ _RUSSIAN = {
     "Invalid source call diagnostic": "Некорректный отчёт об исходном звонке",
     "A candidate cited a call without readable audio": "Кандидат ссылается на звонок без доступного аудио",
     "Invalid voice sample response: {error}": "Некорректный ответ при подборе образцов: {error}",
-    "Listen to the candidates and move the best FLAC to {folder}. Leave the JSON files in the candidate folder.":
-        "Прослушайте кандидатов и перенесите лучший FLAC в {folder}. Оставьте JSON в папке кандидатов.",
-    "Then start transcription for the same folder again.": "После этого снова запустите расшифровку той же папки.",
-    "{scope}: no voice samples could be prepared for {person}.": "{scope}: не удалось подобрать образцы для {person}.",
-    "Transcription is on hold. Approve a sample or rerun with --no-voice-samples.":
-        "Расшифровка отложена. Подтвердите образец или запустите с --no-voice-samples.",
     "Invalid voice sample person ID": "Недопустимый ID владельца образца",
     "Invalid voice sample channel": "Недопустимый тип записи для образца",
     "Voice sample channel cannot use a symbolic link: {path}": "Папка типа записи не может быть симлинком: {path}",

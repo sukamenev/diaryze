@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import threading
 import yaml
 
@@ -22,7 +23,7 @@ from .config import (
 )
 from .pipeline import Stats, pack_next_job, run_job
 from .runtime import STOP_EVENT, stop_signals
-from .console import emit, progress_output, render_finished
+from .console import _display, emit, progress_output, render_finished
 from .selftest import run_selftest
 from .terminal import preserve_terminal
 from .diagnostics import record, run_log
@@ -32,6 +33,8 @@ from .voice_samples import (
     has_approved_sample, import_confirmed_voice_samples, pending_voice_samples, phone_owner, prepare_voice_samples,
     review_voice_sample,
 )
+
+VOICE_SAMPLE_ERRORS = (OSError, ValueError, subprocess.TimeoutExpired, yaml.YAMLError)
 
 
 # Select the interface language before parsing the full command line.
@@ -149,6 +152,7 @@ def _main(parser, args):
 
 # Run a standalone preparation or review action against the archive's voice samples.
 def _run_voice_sample_action(args, source_dir):
+    log_path = None
     try:
         with stop_signals(), preserve_terminal():
             if person := args.prepare_voice_sample:
@@ -160,13 +164,17 @@ def _run_voice_sample_action(args, source_dir):
                         raise ValueError(tr("Choose a folder with a known phone owner or provide the owner ID"))
                 if person not in people:
                     raise ValueError(tr("Person is missing from the catalog: {person}", person=person))
-                with run_log() as path:
-                    emit(tr("Diagnostic log: {path}", path=path))
+                with run_log() as log_path:
                     record("voice_sample_preparation_started", person=person, folder=args.subdir, model=args.model)
-                    samples = prepare_voice_samples(person, source_dir, args)
+                    try:
+                        samples = prepare_voice_samples(person, source_dir, args)
+                    except VOICE_SAMPLE_ERRORS as exc:
+                        record("voice_sample_error", person=person, folder=args.subdir, error=exc)
+                        raise
+                if STOP_EVENT.is_set():
+                    return 130
                 if not samples:
-                    emit(tr("No suitable voice sample found for {person}", person=person))
-                    return 1
+                    raise ValueError(tr("No suitable voice sample found for {person}", person=person))
                 _show_voice_candidates(samples)
             elif path := args.approve_voice_sample:
                 sample = review_voice_sample(path, approve=True)
@@ -176,23 +184,32 @@ def _run_voice_sample_action(args, source_dir):
                 emit(tr("Voice sample review rejected: {path}", path=args.reject_voice_sample))
     except InterruptedError:
         return 130
-    except (OSError, ValueError, subprocess.TimeoutExpired, yaml.YAMLError) as exc:
-        emit(f"[ERR] {ui_error(exc)}")
+    except VOICE_SAMPLE_ERRORS as exc:
+        _show_voice_error(exc, log_path)
         return 1
     return 0
 
 
-# Print the clips and the destination for the selected files.
+# Show the review instructions with one linkable path for the whole set.
 def _show_voice_candidates(samples):
-    emit(tr("Voice sample candidates") + "\n" + "\n".join(str(path) for path in samples), flush=True)
-    confirmed = samples[0].parent.with_name("confirmed")
-    emit(tr("Listen to the candidates and move the best FLAC to {folder}. Leave the JSON files in the candidate folder.",
-            folder=confirmed))
-    emit(tr("Then start transcription for the same folder again."))
+    emit(tr("Listen to the voice clips in {folder}/ ({count}).", folder=_display(samples[0].parent),
+            count=len(samples)))
+    emit(tr("Move the best FLAC to the adjacent confirmed/ folder, leave the JSON files in place, and rerun transcription."))
+
+
+# Show one short error and point to its diagnostic log when available.
+def _show_voice_error(error, log_path, *, scope=""):
+    message = _display(" ".join(ui_error(error).split()))
+    if len(message) > 240:
+        message = message[:239] + "…"
+    prefix = f"{_display(scope)}: " if scope else ""
+    emit(f"[ERR] {prefix}{message}", file=sys.stderr)
+    if log_path is not None:
+        emit(tr("Details in {path}", path=_display(log_path)), file=sys.stderr)
 
 
 # Stage samples for each phone owner within the requested folder.
-def _voice_sample_preflight(candidates, args):
+def _voice_sample_preflight(candidates, args, *, log_path=None):
     people, _ = load_refs()
     requested = Path(resolve_source_dir(args.subdir))
     checked = set()
@@ -215,25 +232,23 @@ def _voice_sample_preflight(candidates, args):
                 continue
             samples = pending_voice_samples(person, source)
             if not samples:
-                waiting = True
                 samples = prepare_voice_samples(person, source, args, target_item=item)
+            if STOP_EVENT.is_set():
+                return True
+            if not samples:
+                raise ValueError(tr("No suitable voice sample found for {person}", person=person))
         except InterruptedError:
             return True
-        except (OSError, ValueError, subprocess.TimeoutExpired, yaml.YAMLError) as exc:
+        except VOICE_SAMPLE_ERRORS as exc:
             waiting = True
             record('voice_sample_error', items=[item], person=person, error=exc)
-            emit(f"[WARN] {owner_file}: {exc}", flush=True)
+            _show_voice_error(exc, log_path, scope=owner_file)
             if getattr(args, "stop_on_quota", False) and classify_error(exc) == "quota":
                 break
             continue
-        if samples:
-            waiting = True
-            record('voice_samples_pending', items=[item], person=person, paths=[str(path) for path in samples])
-            _show_voice_candidates(samples)
-        else:
-            emit(tr("{scope}: no voice samples could be prepared for {person}.", scope=owner_file, person=person))
-    if waiting:
-        emit(tr("Transcription is on hold. Approve a sample or rerun with --no-voice-samples."))
+        waiting = True
+        record('voice_samples_pending', items=[item], person=person, paths=[str(path) for path in samples])
+        _show_voice_candidates(samples)
     return waiting
 
 
@@ -243,10 +258,9 @@ def _run(args):
         if args.dry_run:
             return run_workers(args)
         with run_log() as path:
-            emit(tr("Diagnostic log: {path}", path=path), flush=True)
             record('run_started', options=vars(args))
             try:
-                result = run_workers(args)
+                result = run_workers(args, log_path=path)
                 return 1 if result and result['failed_files'] else 0
             except ModelsUnavailable as exc:
                 record('fatal_error', error=exc)
@@ -258,16 +272,24 @@ def _run(args):
 
 
 # Scan the pending queue, coordinate workers, and report final totals.
-def run_workers(args):
+def run_workers(args, *, log_path=None):
     without_samples = getattr(args, 'no_voice_samples', False)
+    confirmed = []
     if not args.dry_run and not without_samples:
         for sample in import_confirmed_voice_samples():
             record('voice_sample_confirmed', path=str(sample))
-            emit(tr("Voice sample approved: {sample}", sample=sample), flush=True)
+            confirmed.append(sample)
     cands = scan_pending(args.subdir, retry_skipped=args.retry_skipped, retry_refused=args.retry_refused,
                          retry_recovery=getattr(args, "retry_recovery", False))
     if args.limit > 0:
         cands = cands[: args.limit]
+    if (cands and not args.dry_run and not without_samples and not getattr(args, 'skip_voice_sample_preflight', False)
+            and _voice_sample_preflight(cands, args, log_path=log_path)):
+        return
+    if log_path is not None:
+        emit(tr("Diagnostic log: {path}", path=log_path))
+    for sample in confirmed:
+        emit(tr("Voice sample approved: {sample}", sample=sample))
     faad_state = "ok" if args.use_faad else tr("disabled" if args.no_faad else "missing")
     untrunc_state = args.untrunc_bin or tr("disabled" if args.no_untrunc else "missing")
     models_str = " → ".join(args.model_chain)
@@ -286,10 +308,6 @@ def run_workers(args):
     if not cands:
         record('run_finished', summary={'done': 0, 'failed_files': 0}, failed_files=[])
         return
-    if (not without_samples and not getattr(args, 'skip_voice_sample_preflight', False)
-            and _voice_sample_preflight(cands, args)):
-        return
-
     pending_dq = deque(cands)
     active_rels = set()
     attempts = Counter()

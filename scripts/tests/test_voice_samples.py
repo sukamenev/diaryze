@@ -126,7 +126,7 @@ class VoiceSampleTests(unittest.TestCase):
             with self.subTest(reply=reply), self.assertRaisesRegex(ValueError, reason):
                 voice_samples._parse_sample_reply(reply, calls)
 
-    # Report and record the model's per-call reasons even when the candidate list is empty.
+    # Keep per-call diagnostics in the log and show a short error when no clip qualifies.
     def test_standalone_preparation_logs_no_candidate_reply(self):
         calls = [{"audio_rel": f"Phone/{number}.wav", "clean_abs": f"/tmp/{number}.wav",
                   "direction": "in", "duration_ms": 30_000} for number in (1, 2)]
@@ -139,13 +139,17 @@ class VoiceSampleTests(unittest.TestCase):
               mock.patch.object(cli, "load_refs", return_value=(PEOPLE, {})),
               mock.patch.object(voice_samples, "_prepare_calls", return_value=calls),
               mock.patch.object(voice_samples, "run_agy", return_value=result) as provider,
-              contextlib.redirect_stdout(io.StringIO()) as output):
+              contextlib.redirect_stdout(io.StringIO()) as output,
+              contextlib.redirect_stderr(io.StringIO()) as errors):
             self.assertEqual(cli.main(), 1)
         provider.assert_called_once()
         self.assertIn("/tmp/2.wav", provider.call_args.args[0])
-        self.assertIn(reply["summary"], output.getvalue())
-        self.assertIn("Call 2 (audio unavailable) Phone/2.wav: read_file reported access denied.", output.getvalue())
+        self.assertEqual(output.getvalue(), "")
         log, = config.data_path("logs").glob("diarize-*.jsonl")
+        self.assertEqual(errors.getvalue().splitlines(), [
+            "[ERR] The model could read 1 of 2 calls. Comparing voices needs at least two.",
+            f"Details in {log}",
+        ])
         rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
         request = next(row for row in rows if row["event"] == "voice_sample_request")
         self.assertEqual(request["files"], ["Phone/1.wav", "Phone/2.wav"])
@@ -176,11 +180,15 @@ class VoiceSampleTests(unittest.TestCase):
         with (mock.patch("sys.argv", argv),
               mock.patch.object(cli, "load_refs", return_value=(PEOPLE, {})),
               mock.patch.object(cli, "prepare_voice_samples", return_value=[scope / "fixture.flac"]) as prepare,
-              mock.patch.object(cli, "emit"),
+              contextlib.redirect_stdout(io.StringIO()) as output,
               mock.patch.object(cli, "find_untrunc", return_value=None),
               mock.patch.object(cli, "_get_libfaad", return_value=None)):
             self.assertEqual(cli.main(), 0)
         self.assertEqual(prepare.call_args.args[:2], (PERSON, str(scope)))
+        self.assertEqual(output.getvalue().splitlines(), [
+            f"Listen to the voice clips in {scope}/ (1).",
+            "Move the best FLAC to the adjacent confirmed/ folder, leave the JSON files in place, and rerun transcription.",
+        ])
 
     # Exercise real cutting, file-manager selections, and storage independent of the source.
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "requires FFmpeg")
@@ -208,12 +216,11 @@ class VoiceSampleTests(unittest.TestCase):
         result = (0, json.dumps({"status": "SUCCESS", "result": json.dumps(reply)}), "", None)
 
         with (mock.patch.object(voice_samples, "run_agy", return_value=result) as provider,
-              mock.patch.object(voice_samples, "emit"),
               mock.patch.object(cli, "run_job") as transcribe,
-              mock.patch.object(cli, "emit"),
+              contextlib.redirect_stdout(io.StringIO()) as output,
               mock.patch.object(cli, "record")):
-            self.assertIsNone(cli.run_workers(self.args))
-            self.assertIsNone(cli.run_workers(self.args))
+            self.assertIsNone(cli.run_workers(self.args, log_path=self.root / "quiet.log"))
+            self.assertIsNone(cli.run_workers(self.args, log_path=self.root / "quiet.log"))
             provider.assert_called_once()
             self.assertIn("Choose 5 to 20 seconds", provider.call_args.args[0])
             transcribe.assert_not_called()
@@ -225,6 +232,10 @@ class VoiceSampleTests(unittest.TestCase):
         self.assertIsNone(voice_samples.owner_reference(item, PEOPLE))
         pending = self.root / "00_Diaryze_Data/voice_samples" / PERSON / "phone/candidate"
         confirmed = pending.with_name("confirmed")
+        self.assertEqual(output.getvalue().splitlines(), [
+            f"Listen to the voice clips in {pending}/ (3).",
+            "Move the best FLAC to the adjacent confirmed/ folder, leave the JSON files in place, and rerun transcription.",
+        ] * 2)
         self.assertTrue(all(path.parent == pending for path in candidates))
         provenance = {path.name: json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
                       for path in candidates}

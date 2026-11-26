@@ -14,7 +14,6 @@ from . import config
 from .agy import agy_forget, extract_envelope_error_and_usage, run_agy
 from .archive import is_audio_candidate, is_excluded_source_dir, parse_filename, sha256_file
 from .audio import prepare_audio_work, probe_duration_ms
-from .console import _display, emit
 from .diagnostics import record
 from .owners import find_folder_owner
 from .processes import run_capture
@@ -32,7 +31,7 @@ MIN_SOURCE_MS = 10_000
 MAX_SOURCE_SEC = 180
 MAX_SOURCE_CALLS = 4
 MAX_CANDIDATES = 3
-READ_STATUS_LABELS = {"read": "audio read", "unreadable": "audio unavailable", "not_attempted": "not attempted"}
+READ_STATUSES = {"read", "unreadable", "not_attempted"}
 
 
 # Convert a date or timestamp to the recording day in the archive's time zone.
@@ -288,7 +287,7 @@ def _parse_sample_reply(text, calls):
             raise ValueError(tr("Invalid source call diagnostic"))
         number, status, detail = report.get("call"), report.get("read_status"), report.get("detail")
         if (type(number) is not int or not 1 <= number <= len(calls) or number in by_number
-                or not isinstance(status, str) or status not in READ_STATUS_LABELS
+                or not isinstance(status, str) or status not in READ_STATUSES
                 or not isinstance(detail, str) or not detail.strip() or len(detail) > 500):
             raise ValueError(tr("Invalid source call diagnostic"))
         by_number[number] = {"call": number, "read_status": status, "detail": detail.strip()}
@@ -325,7 +324,6 @@ def _request_candidates(person, calls, args):
         diagnostic_language="Russian" if getattr(args, "ui", "en") == "ru" else "English",
         min_seconds=MIN_SAMPLE_MS // 1000, max_seconds=MAX_SAMPLE_MS // 1000,
     )
-    emit(tr("Asking {model} to review {count} calls for voice samples", model=args.model, count=len(calls)))
     record("voice_sample_request", items=calls, person=person, model=args.model, calls=inputs)
     home = conversation = None
     text = ""
@@ -341,18 +339,18 @@ def _request_candidates(person, calls, args):
             raise ValueError(tr("Invalid voice sample response: {error}", error=exc)) from exc
         record("voice_sample_result", items=calls, person=person, model=args.model, summary=summary,
                call_diagnostics=reports, candidate_count=len(candidates), response=text, usage=usage)
-        emit(tr("Voice sample result: {summary}", summary=_display(summary)))
-        for report in reports:
-            number = report["call"]
-            emit(tr("Call {number} ({status}) {path}: {detail}", number=number,
-                    status=tr(READ_STATUS_LABELS[report["read_status"]]),
-                    path=_display(calls[number - 1]["audio_rel"]), detail=_display(report["detail"])))
-        return candidates
     except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
         record("voice_sample_request_error", items=calls, person=person, model=args.model, response=text, error=exc)
         raise
     finally:
         agy_forget(home, conversation)
+    if not candidates and not STOP_EVENT.is_set():
+        readable = sum(report["read_status"] == "read" for report in reports)
+        if readable < 2:
+            raise ValueError(tr("The model could read {count} of {total} calls. Comparing voices needs at least two.",
+                                count=readable, total=len(calls)))
+        raise ValueError(tr("No suitable voice clip found in the reviewed calls."))
+    return candidates
 
 
 # Extract a clean standalone FLAC and confirm that decoding produced the selected span.
@@ -439,8 +437,8 @@ def prepare_voice_samples(person, source_dir, args, *, target_item=None):
             return existing
         confirm_pending = _review_sets(candidate).get(scope, {})
         if any(os.path.lexists(confirmed / name) for name in confirm_pending):
-            emit(tr("Clips are already awaiting validation in {folder}.", folder=confirmed))
-            return []
+            raise ValueError(tr("Selected clips are in {folder}. Start transcription to validate them.",
+                                folder=confirmed))
         candidate.mkdir(parents=True, exist_ok=True)
         confirmed.mkdir(exist_ok=True)
         with (tempfile.TemporaryDirectory(prefix="diaryze-voice-inputs-") as inputs,
@@ -451,9 +449,8 @@ def prepare_voice_samples(person, source_dir, args, *, target_item=None):
                 return []
             if len(calls) < 2:
                 record("voice_sample_insufficient_calls", items=calls, person=person, folder=scope, required=2)
-                emit(tr("Prepared {count} calls. Voice comparison needs two readable calls with different contacts.",
-                        count=len(calls)))
-                return []
+                raise ValueError(tr("Prepared {count} calls. Voice comparison needs two readable calls with different contacts.",
+                                    count=len(calls)))
             candidates = _request_candidates(person, calls, args)
             if STOP_EVENT.is_set():
                 return []
