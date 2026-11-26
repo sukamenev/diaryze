@@ -96,22 +96,50 @@ class VoiceSampleTests(unittest.TestCase):
         (override / ".owner").write_text("type: recorder\n", encoding="utf-8")
         self.assertIsNone(voice_samples.owner_reference(dict(item, audio_rel="Phone/Recorder/a.wav"), PEOPLE))
 
-    # Check that references travel with both short files and long recording parts.
-    def test_prompts_include_only_the_relevant_approved_reference(self):
+    # Check that shared references precede batch metadata and keep their item associations.
+    def test_batch_prompt_groups_approved_references_before_items(self):
         reference = self.sample("2025-05-12_01.flac")
+        later = self.sample("2025-06-12_01.flac")
         item = {"audio_rel": "Phone/call.m4a", "dt": "2025-05-10",
                 "direction": "in", "clean_abs": "/tmp/main.wav", "duration_ms": 20_000}
-        other = dict(item, audio_rel="Recorder/other.wav")
-        batch = prompts.build_batch_prompt([item, other], PEOPLE, {})
+        another = dict(item, audio_rel="Phone/another.m4a", clean_abs="/tmp/second.wav")
+        newer = dict(item, audio_rel="Phone/newer.m4a", dt="2025-06-11")
+        recorder = dict(item, audio_rel="Recorder/other.wav")
+        batch = prompts.build_batch_prompt([item, another, newer, recorder], PEOPLE, {})
         reference_json = json.dumps(str(reference), ensure_ascii=False)
+        later_json = json.dumps(str(later), ensure_ascii=False)
         self.assertEqual(batch.count(reference_json), 1)
-        self.assertLess(batch.index(reference_json), batch.index("ITEM 2:"))
+        self.assertEqual(batch.count(later_json), 1)
+        self.assertLess(batch.index("Transcribe speech faithfully"), batch.index(reference_json))
+        self.assertLess(batch.index(reference_json), batch.index(later_json))
+        self.assertLess(batch.index(later_json), batch.index('"catalog_paths":'))
+        item_sections = batch.split("\n\nITEM ")[1:]
+        self.assertTrue(item_sections[0].endswith("- voice reference: 1"))
+        self.assertTrue(item_sections[1].endswith("- voice reference: 1"))
+        self.assertTrue(item_sections[2].endswith("- voice reference: 2"))
+        self.assertNotIn("- voice reference:", item_sections[3])
+        first = prompts.build_batch_prompt([item], PEOPLE, {})
+        second = prompts.build_batch_prompt([another], {}, {}, voice_references=[
+            {"person": PERSON, "file": str(reference)},
+        ])
+        self.assertEqual(first.split('\n\n{', 1)[0], second.split('\n\n{', 1)[0])
+
+    # Check that long parts put the reference before their paths and fresh-session metadata.
+    def test_part_prompts_put_approved_reference_before_recording_metadata(self):
+        reference = self.sample("2025-05-12_01.flac")
+        item = {"audio_rel": "Phone/call.m4a", "dt": "2025-05-10",
+                "direction": "in", "duration_ms": 20_000}
         part = {"part": 1, "path": "/tmp/part.wav", "duration_ms": 12_000}
         first = prompts.build_part_prompt(item, part, PEOPLE, {}, True)
         later = prompts.build_part_prompt(item, dict(part, part=2), PEOPLE, {}, False, fresh_session=True)
-        for prompt in (first, later):
-            self.assertIn(reference_json, prompt)
+        resumed = prompts.build_part_prompt(item, dict(part, part=2), PEOPLE, {}, False)
+        reference_json = json.dumps(str(reference), ensure_ascii=False)
+        for prompt in (first, later, resumed):
+            self.assertLess(prompt.index("Transcribe speech faithfully"), prompt.index(reference_json))
+            self.assertLess(prompt.index(reference_json), prompt.index(part["path"]))
             self.assertIn("Exclude the reference's speech", prompt)
+        self.assertLess(later.index(reference_json), later.index(item["audio_rel"]))
+        self.assertLess(later.index(reference_json), later.index('"catalog_paths":'))
 
     # Verify that overlaps and out-of-bounds model replies are rejected before ffmpeg.
     def test_rejects_invalid_candidate_intervals(self):

@@ -4,5 +4,3 @@ Known speakers from earlier parts (preserve their keys and confirmed identities)
 $speakers
 
 $references
-
-$part_prompt

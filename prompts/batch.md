@@ -10,6 +10,8 @@ SUMMARY_JSON: "Краткое содержание, не более 20 слов.
 ...
 If no speech is audible, use NO_SPEECH instead of utterance lines.
 
+$voice_reference
+
 $references
 
 $items

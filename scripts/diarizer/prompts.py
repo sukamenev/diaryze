@@ -141,13 +141,11 @@ def owner_hint(audio_rel: str, root: str | None = None, *, people=None, directio
     return load_prompt("owner-other.md")
 
 
-# Describe the approved reference for a recording when its known owner has one.
-def voice_reference(item, people, reference=...):
-    if reference is ...:
-        reference = owner_reference(item, people)
-    if reference:
-        return load_prompt('voice-reference.md', reference=json.dumps(reference, ensure_ascii=False))
-    return ""
+# Render each approved clip once, in the order of its reference number.
+def format_voice_references(references) -> str:
+    if not references:
+        return ""
+    return load_prompt('voice-reference.md', references=json.dumps(references, ensure_ascii=False))
 
 
 # Build the instructions and recording descriptors for short audio files.
@@ -155,6 +153,7 @@ def build_batch_prompt(items: list[dict], people: dict, orgs: dict, *, voice_ref
     if voice_references is None:
         voice_references = [owner_reference(item, people) for item in items]
     descriptions = []
+    samples = {}
     for index, (item, sample) in enumerate(zip(items, voice_references, strict=True), 1):
         descriptions.append('\n'.join((
             f'ITEM {index}:',
@@ -166,9 +165,14 @@ def build_batch_prompt(items: list[dict], people: dict, orgs: dict, *, voice_ref
             f"- phones: {item.get('phones', [])}",
             f"- context: {owner_hint(item['audio_rel'], people=people, direction=item.get('direction'))}",
         )))
-        if reference := voice_reference(item, people, sample):
-            descriptions[-1] += "\n" + reference
+        if sample:
+            key = (sample["person"], sample["file"])
+            reference_number = samples.setdefault(key, len(samples) + 1)
+            descriptions[-1] += f"\n- voice reference: {reference_number}"
     return load_prompt('batch.md', rules=load_prompt('rules.md'),
+                       voice_reference=format_voice_references([
+                           {"person": person, "file": file} for person, file in samples
+                       ]),
                        references=format_refs_for_prompt(people, orgs, items),
                        items='\n\n'.join(descriptions))
 
@@ -176,21 +180,23 @@ def build_batch_prompt(items: list[dict], people: dict, orgs: dict, *, voice_ref
 # Build a segment prompt with the context needed for its session.
 def build_part_prompt(item: dict, part: dict, people: dict, orgs: dict, is_first: bool,
                       *, fresh_session=False, speaker_context=None, voice_sample=...) -> str:
+    if voice_sample is ...:
+        voice_sample = owner_reference(item, people)
     common = {'rules': load_prompt('rules.md'), 'path': part['path'],
               'part_duration': format_ts(part['duration_ms']),
               'part_duration_ms': part['duration_ms'],
-              'voice_reference': voice_reference(item, people, voice_sample)}
+              'voice_reference': format_voice_references([voice_sample] if voice_sample else [])}
     if is_first:
         return load_prompt('part-first.md', **common, audio_rel=item['audio_rel'],
                            total_duration=format_ts(item['duration_ms']),
                            references=format_refs_for_prompt(people, orgs, [item]),
                            owner_hint=owner_hint(item['audio_rel'], people=people, direction=item.get('direction')))
-    prompt = load_prompt('part-next.md', **common, part_number=part['part'],
-                         overlap_seconds=part.get('overlap_ms', 15000) / 1000,
-                         previous_summary=json.dumps(item.get('summary'), ensure_ascii=False))
+    context = ""
     if fresh_session:
-        return load_prompt('part-context.md', part_prompt=prompt, audio_rel=item['audio_rel'],
-                           references=format_refs_for_prompt(people, orgs, [item]),
-                           owner_hint=owner_hint(item['audio_rel'], people=people, direction=item.get('direction')),
-                           speakers=json.dumps(speaker_context or {}, ensure_ascii=False))
-    return prompt
+        context = load_prompt('part-context.md', audio_rel=item['audio_rel'],
+                              references=format_refs_for_prompt(people, orgs, [item]),
+                              owner_hint=owner_hint(item['audio_rel'], people=people, direction=item.get('direction')),
+                              speakers=json.dumps(speaker_context or {}, ensure_ascii=False))
+    return load_prompt('part-next.md', **common, context=context, part_number=part['part'],
+                       overlap_seconds=part.get('overlap_ms', 15000) / 1000,
+                       previous_summary=json.dumps(item.get('summary'), ensure_ascii=False))
