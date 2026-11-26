@@ -2,7 +2,6 @@
 
 from contextlib import contextmanager
 from datetime import datetime
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -16,7 +15,8 @@ from .archive import is_audio_candidate, is_excluded_source_dir, parse_filename,
 from .audio import prepare_audio_work, probe_duration_ms
 from .diagnostics import record
 from .owners import find_folder_owner
-from .processes import run_capture
+from .platform import locked_path
+from .platform.processes import run_capture
 from .prompt_files import load_prompt
 from .runtime import STOP_EVENT
 from .ui import tr
@@ -187,7 +187,7 @@ def _source_calls(person, source_dir, target_day):
             if path.is_symlink() or not path.is_file() or not is_audio_candidate(path):
                 continue
             candidates.append({
-                "audio_abs": str(path), "audio_rel": str(rel_dir / name), "dt": dt,
+                "audio_abs": str(path), "audio_rel": (rel_dir / name).as_posix(), "dt": dt,
                 "direction": direction, "contact_key": phones[0] if phones else contact.casefold(),
                 "owner_file": owner_file,
             })
@@ -551,8 +551,7 @@ def _review_lock(person, channel):
     if lock_path.resolve() != lock_path:
         raise ValueError(tr("Voice sample locks cannot use a symbolic link"))
     directory.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with locked_path(lock_path, create=True, blocking=False):
         yield
 
 

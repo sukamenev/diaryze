@@ -5,6 +5,7 @@ import os
 import signal
 import threading
 
+from .platform import STOP_SIGNALS
 from .ui import tr
 
 
@@ -51,7 +52,7 @@ def stop_signals():
 
     previous = {}
     try:
-        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        for sig in STOP_SIGNALS:
             previous[sig] = signal.signal(sig, handle_stop)
         yield
     finally:

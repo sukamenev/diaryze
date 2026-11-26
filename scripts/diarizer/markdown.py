@@ -1,6 +1,5 @@
 """Edit existing transcript metadata while preserving the rest of the file."""
 
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -12,6 +11,7 @@ from yaml.nodes import MappingNode, ScalarNode
 from yaml.tokens import FlowEntryToken
 
 from .identification import split_markdown
+from .platform import locked_path
 
 
 # Write updated Markdown atomically and preserve file metadata.
@@ -149,12 +149,14 @@ class TranscriptFile:
             before = self.path.lstat()
             if self.path.suffix.lower() != ".md" or not stat.S_ISREG(before.st_mode):
                 raise ValueError("Choose a regular .md file")
-            with self.path.open("rb") as stream:
-                fcntl.flock(stream, fcntl.LOCK_EX)
-                before = os.fstat(stream.fileno())
-                if not os.path.samestat(before, self.path.lstat()):
+            with locked_path(self.path) as stream:
+                before = self.path.lstat()
+                if not stat.S_ISREG(before.st_mode):
+                    raise ValueError("Choose a regular .md file")
+                if stream is not None and not os.path.samestat(before, os.fstat(stream.fileno())):
                     continue
-                raw = stream.read()
+                # Windows requires the target file to be closed before os.replace().
+                raw = stream.read() if stream is not None else self.path.read_bytes()
                 changed = patch_scratch(raw, namespace, value)
                 if changed == raw:
                     return False

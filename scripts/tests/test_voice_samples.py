@@ -103,13 +103,14 @@ class VoiceSampleTests(unittest.TestCase):
                 "direction": "in", "clean_abs": "/tmp/main.wav", "duration_ms": 20_000}
         other = dict(item, audio_rel="Recorder/other.wav")
         batch = prompts.build_batch_prompt([item, other], PEOPLE, {})
-        self.assertEqual(batch.count(str(reference)), 1)
-        self.assertLess(batch.index(str(reference)), batch.index("ITEM 2:"))
+        reference_json = json.dumps(str(reference), ensure_ascii=False)
+        self.assertEqual(batch.count(reference_json), 1)
+        self.assertLess(batch.index(reference_json), batch.index("ITEM 2:"))
         part = {"part": 1, "path": "/tmp/part.wav", "duration_ms": 12_000}
         first = prompts.build_part_prompt(item, part, PEOPLE, {}, True)
         later = prompts.build_part_prompt(item, dict(part, part=2), PEOPLE, {}, False, fresh_session=True)
         for prompt in (first, later):
-            self.assertIn(str(reference), prompt)
+            self.assertIn(reference_json, prompt)
             self.assertIn("Exclude the reference's speech", prompt)
 
     # Verify that overlaps and out-of-bounds model replies are rejected before ffmpeg.

@@ -11,6 +11,7 @@ import unicodedata
 from .config import TZ
 from .identification import STATUS_LABELS
 from .runtime import CONSOLE_INTERRUPTED, PRINT_LOCK, STOP_EVENT
+from .platform.terminal import supports_ansi
 from .ui import tr
 
 
@@ -20,7 +21,7 @@ _SGR = re.compile(r"\x1b\[[0-9;]*m")
 
 # Determine whether the stream supports terminal presentation.
 def _interactive(stream):
-    return (getattr(stream, "isatty", lambda: False)()
+    return (supports_ansi(stream)
             and os.environ.get("TERM") != "dumb" and not STOP_EVENT.is_set())
 
 
@@ -122,7 +123,7 @@ class Palette:
     def __init__(self, stream=None, enabled=None):
         stream = stream if stream is not None else sys.stdout
         self.enabled = enabled if enabled is not None else (
-            getattr(stream, "isatty", lambda: False)()
+            supports_ansi(stream)
             and os.environ.get("TERM") != "dumb" and "NO_COLOR" not in os.environ
         )
 

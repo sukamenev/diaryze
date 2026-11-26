@@ -15,7 +15,8 @@ import wave
 import yaml
 
 from scripts.diarizer import (agy, archive, audio, checkpoints, cli, config, console, pipeline,
-                              processes, prompts, quota, runtime)
+                              prompts, quota, runtime)
+from scripts.diarizer.platform import processes
 
 
 # Wrap a fake provider response in the CLI's expected JSON envelope.
@@ -48,7 +49,7 @@ class TemporaryArchive(unittest.TestCase):
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"synthetic input: " + name.encode())
         return {
-            "audio_abs": str(source), "audio_rel": str(source.relative_to(self.root)),
+            "audio_abs": str(source), "audio_rel": source.relative_to(self.root).as_posix(),
             "clean_abs": str(source), "target_md": str(self.root / "00_Diaryze_Data/Text/Phone/2026" / (name + ".md")),
             "sha256": archive.sha256_file(source), "duration_ms": duration,
             "dt": None, "direction": None, "contact": "Test", "phones": [],
@@ -72,7 +73,11 @@ class ArchiveTests(TemporaryArchive):
         renamed = self.root / "Recordings/sound.blob"
         renamed.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
         wanted.add("Recordings/sound.blob")
-        (self.root / "Phone/link.m4a").symlink_to(self.root / "root.amr")
+        try:
+            (self.root / "Phone/link.m4a").symlink_to(self.root / "root.amr")
+        except OSError as exc:
+            if getattr(exc, "winerror", None) != 1314:  # Symlink creation needs a Windows privilege.
+                raise
         found = {x["audio_rel"] for x in archive.scan_pending()}
         self.assertEqual(found, wanted)
         scoped = archive.scan_pending(str(self.root / "Recordings"))
@@ -182,8 +187,9 @@ class PipelineTests(TemporaryArchive):
                 mock.patch.object(pipeline, "agy_forget"), contextlib.redirect_stdout(io.StringIO()) as output:
             pipeline.process_short_batch(items, self.args(), people, {}, stats)
         prompt = run.call_args.args[0]
-        self.assertEqual(prompt.count(str(reference)), 1)
-        self.assertLess(prompt.index(str(reference)), prompt.index("ITEM 2:"))
+        reference_json = json.dumps(str(reference), ensure_ascii=False)
+        self.assertEqual(prompt.count(reference_json), 1)
+        self.assertLess(prompt.index(reference_json), prompt.index("ITEM 2:"))
         self.assertEqual((stats.done, stats.audio_ms, stats.tok_in, stats.tok_out), (2, 10000, 10, 5))
         self.assertEqual(len(output.getvalue().splitlines()), 6)
         self.assertIn("Done 1", output.getvalue())

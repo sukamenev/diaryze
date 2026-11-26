@@ -25,7 +25,7 @@ from .pipeline import Stats, pack_next_job, run_job
 from .runtime import STOP_EVENT, stop_signals
 from .console import _display, emit, progress_output, render_finished
 from .selftest import run_selftest
-from .terminal import preserve_terminal
+from .platform.terminal import preserve_terminal
 from .diagnostics import record, run_log
 from .errors import ModelsUnavailable, classify_error, ui_error
 from .ui import LANGUAGES, argparse_ui, tr, use_ui

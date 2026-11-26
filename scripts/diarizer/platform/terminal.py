@@ -3,12 +3,31 @@
 from contextlib import contextmanager
 import os
 import sys
-import termios
+
+from . import windows
+from . import IS_WINDOWS
+
+
+# Require virtual terminal mode before emitting escape sequences on Windows.
+def supports_ansi(stream):
+    if not getattr(stream, "isatty", lambda: False)():
+        return False
+    if not IS_WINDOWS:
+        return True
+    state = windows.console_mode(stream)
+    return state is not None and bool(state[1] & windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING)
 
 
 # Save and restore terminal settings around archive processing.
 @contextmanager
 def preserve_terminal():
+    if IS_WINDOWS:
+        with windows.preserve_console(sys.stdin, sys.stdout, sys.stderr):
+            yield
+        return
+
+    import termios
+
     saved = []
     seen = set()
     output_fd = None

@@ -3,6 +3,7 @@
 import glob
 import json
 import os
+from pathlib import Path
 import re
 import shutil
 import stat
@@ -18,16 +19,31 @@ from .config import (
     SAFETY_ERR_PAT,
 )
 from .errors import normalize_error
-from .processes import run_capture
+from .platform import IS_WINDOWS
+from .platform.processes import run_capture
 from .prompt_files import load_prompt
 
 
 AGY_HOME_LOCK = threading.Lock()
 
 
+# Keep the existing audio reader instructions available in either agy home.
+def _install_audio_reader(home):
+    path = Path(home) / ".gemini" / "config" / "agents" / CUSTOM_AGENT_NAME / "agent.md"
+    content = load_prompt("audio-reader.md") + "\n"
+    if not path.exists() or path.read_text(encoding="utf-8") != content:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
 # Prepare a separate agent home with shared credentials and the optional reader profile.
 def ensure_agy_home(use_custom_agent: bool) -> str | None:
     """Create isolated temp HOME for agy to keep /resume clean and load minimal agent."""
+    if IS_WINDOWS:
+        if use_custom_agent:
+            with AGY_HOME_LOCK:
+                _install_audio_reader(Path.home())
+        return None
     # Do not require antigravity-oauth-token: macOS signs in through Keychain,
     # so the file can be absent while agy is authenticated. Link whatever shared
     # files exist and install the reader profile regardless.
@@ -49,12 +65,7 @@ def ensure_agy_home(use_custom_agent: bool) -> str | None:
                 os.unlink(dst)
             os.symlink(src, dst)
         if use_custom_agent:
-            apath = os.path.join(home, ".gemini", "config", "agents", CUSTOM_AGENT_NAME, "agent.md")
-            want = load_prompt('audio-reader.md') + '\n'
-            if not os.path.exists(apath) or open(apath, encoding="utf-8").read() != want:
-                os.makedirs(os.path.dirname(apath), exist_ok=True)
-                with open(apath, "w", encoding="utf-8") as f:
-                    f.write(want)
+            _install_audio_reader(home)
         return home
 
 
@@ -96,7 +107,7 @@ def run_agy(prompt: str, model: str, timeout: int, use_custom_agent: bool, conve
         "--disable-slash-commands",
         "--print-timeout", f"{timeout}s",
     ]
-    if use_custom_agent and home:
+    if use_custom_agent and (home or IS_WINDOWS):
         cmd += ["--agent", CUSTOM_AGENT_NAME, "--dangerously-skip-permissions"]
     if conversation_id:
         cmd += ["--conversation", conversation_id]

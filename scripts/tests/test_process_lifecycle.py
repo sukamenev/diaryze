@@ -14,7 +14,7 @@ import time
 import unittest
 
 from scripts.diarizer.agy import agy_envelope_complete, extract_envelope_error_and_usage
-from scripts.diarizer.processes import run_capture
+from scripts.diarizer.platform.processes import run_capture
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -130,9 +130,9 @@ time.sleep(60)
 '''
             driver = f'''
 import fcntl, pathlib, sys, termios, threading, time
-from scripts.diarizer.processes import run_capture
+from scripts.diarizer.platform.processes import run_capture
 from scripts.diarizer.runtime import stop_signals
-from scripts.diarizer.terminal import preserve_terminal
+from scripts.diarizer.platform.terminal import preserve_terminal
 fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 original_attrs = termios.tcgetattr(0)
 def work():

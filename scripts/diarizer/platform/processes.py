@@ -3,13 +3,17 @@
 from contextlib import contextmanager
 import os
 from pathlib import Path
+from queue import Empty, Queue
 import signal
 import subprocess
 import sys
+from threading import Thread
 import time
 
-from .config import PROCESS_RESULT_GRACE_SEC, PROCESS_TERMINATION_GRACE_SEC
-from .runtime import FORCE_STOP_EVENT
+from . import windows
+from ..config import PROCESS_RESULT_GRACE_SEC, PROCESS_TERMINATION_GRACE_SEC
+from . import IS_WINDOWS
+from ..runtime import FORCE_STOP_EVENT
 
 
 # Read process ancestry and group IDs for descendant cleanup.
@@ -54,6 +58,9 @@ def _child_groups(parent_pid):
 
 # Stop the subprocess and its descendant groups.
 def terminate_tree(proc, grace=PROCESS_TERMINATION_GRACE_SEC):
+    if IS_WINDOWS:
+        windows.stop_tree(proc, grace)
+        return
     groups = _child_groups(proc.pid)
 
     # Send a termination signal to each group in the subprocess tree.
@@ -83,14 +90,87 @@ def managed_process(args, **kwargs):
     if FORCE_STOP_EVENT.is_set():
         raise InterruptedError("force stopped")
     kwargs.setdefault("stdin", subprocess.DEVNULL)
-    proc = subprocess.Popen(args, start_new_session=True, **kwargs)
+    if IS_WINDOWS:
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    proc = subprocess.Popen(args, **kwargs)
     try:
+        if IS_WINDOWS:
+            windows.attach_job(proc)
         yield proc
     finally:
         terminate_tree(proc)
         for stream in (proc.stdin, proc.stdout, proc.stderr):
             if stream is not None:
                 stream.close()
+
+
+# Drain Windows pipes incrementally so a complete envelope is visible before EOF.
+def _capture_windows(proc, args, input, timeout, finish_when, finish_grace):
+    updates = Queue()
+    buffers = {proc.stdout: bytearray(), proc.stderr: bytearray()}
+    reading = set(buffers)
+
+    # Forward available bytes from one pipe and mark its end.
+    def read_pipe(pipe):
+        try:
+            while chunk := os.read(pipe.fileno(), 65_536):
+                updates.put((pipe, chunk))
+        except OSError:
+            pass
+        finally:
+            updates.put((pipe, None))
+
+    # Feed stdin separately so a blocked child cannot stall timeout checks.
+    def write_input():
+        try:
+            with proc.stdin:
+                proc.stdin.write(input)
+        except OSError:
+            pass
+
+    for pipe in reading:
+        Thread(target=read_pipe, args=(pipe,), daemon=True).start()
+    if input is not None:
+        Thread(target=write_input, daemon=True).start()
+
+    deadline = None if timeout is None else time.monotonic() + timeout
+    finish_at = None
+    cleaned_up = False
+    while reading or proc.poll() is None:
+        if FORCE_STOP_EVENT.is_set():
+            raise InterruptedError("force stopped")
+        now = time.monotonic()
+        if finish_at is not None and now >= finish_at:
+            terminate_tree(proc)
+            finish_at = None
+            deadline = time.monotonic() + PROCESS_TERMINATION_GRACE_SEC
+            finish_when = None
+            cleaned_up = True
+            continue
+        if deadline is not None and now >= deadline:
+            if cleaned_up:
+                break
+            raise subprocess.TimeoutExpired(args, timeout, output=bytes(buffers[proc.stdout]),
+                                            stderr=bytes(buffers[proc.stderr]))
+        try:
+            pipe, chunk = updates.get(timeout=0.1)
+        except Empty:
+            continue
+        if chunk is None:
+            reading.remove(pipe)
+            continue
+        buffers[pipe].extend(chunk)
+        if pipe is proc.stdout and finish_when and finish_at is None:
+            partial = buffers[pipe].decode(pipe.encoding, errors="replace")
+            if finish_when(partial):
+                finish_at = time.monotonic() + finish_grace
+
+    # Match the universal newline behavior of subprocess.communicate().
+    result = [data.decode(pipe.encoding, errors=pipe.errors).replace("\r\n", "\n").replace("\r", "\n")
+              for pipe, data in buffers.items()]
+    return subprocess.CompletedProcess(args, proc.returncode, *result)
 
 
 # Capture subprocess output with cancellation, timeout, and completion checks.
@@ -104,6 +184,8 @@ def run_capture(args, *, input=None, timeout=None, finish_when=None,
     kwargs.setdefault("encoding", "utf-8")
     with managed_process(args, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **kwargs) as proc:
+        if IS_WINDOWS:
+            return _capture_windows(proc, args, input, timeout, finish_when, finish_grace)
         first = True
         while True:
             if FORCE_STOP_EVENT.is_set():

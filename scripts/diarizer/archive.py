@@ -12,6 +12,7 @@ import yaml
 from . import config
 from .ui import tr
 from .config import AUDIO_EXTENSIONS, EXCLUDED_DIRS, EXCLUDED_FILES, NEEDS_RECOVERY, NO_RECOVERABLE_AUDIO, TRANSCRIPT_SCHEMA_VERSION, TZ
+from .platform import is_link_or_junction, set_mtime
 
 
 MANIFEST_LOCK = threading.Lock()
@@ -240,7 +241,7 @@ def _is_diaryze_checkout(path: Path) -> bool:
 
 # Keep symlinks, service directories, and Diaryze source trees out of audio scans.
 def is_excluded_source_dir(path: Path) -> bool:
-    return is_excluded_dir(path.name) or path.is_symlink() or _is_diaryze_checkout(path)
+    return is_excluded_dir(path.name) or is_link_or_junction(path) or _is_diaryze_checkout(path)
 
 
 # Locate persistent archive data and support older archives that stored it in docs.
@@ -570,7 +571,7 @@ def scan_pending(subdir: str = ".", retry_skipped: bool = False, retry_refused: 
             fp = os.path.join(dirpath, fn)
             if os.path.islink(fp) or not os.path.isfile(fp) or not is_audio_candidate(fp):
                 continue
-            rel = os.path.relpath(fp, config.ROOT)
+            rel = (base / fn).relative_to(config.ROOT).as_posix()
             prev = mstate.get(rel)
             st = (prev or {}).get("status")
             if st == "skipped" and not retry_skipped:
@@ -641,8 +642,7 @@ def sync_file_mtime(path: str | os.PathLike, recorded_at, *, audio_rel: str | No
         target_ns = fallback_ns
     if target_ns is None:
         return None
-    st = os.stat(path, follow_symlinks=False)
-    os.utime(path, ns=(st.st_atime_ns, target_ns), follow_symlinks=False)
+    set_mtime(path, target_ns)
     return target_ns
 
 
@@ -658,7 +658,7 @@ def publish_md(item: dict, md_content: str, model: str):
     sync_file_mtime(target, meta.get("recorded_at"), audio_rel=item.get("audio_rel"))
     append_manifest({
         "audio": item["audio_rel"],
-        "text": os.path.relpath(target, config.ROOT),
+        "text": Path(os.path.relpath(target, config.ROOT)).as_posix(),
         "sha256": item["sha256"],
         "schema_version": TRANSCRIPT_SCHEMA_VERSION,
         "identification": meta["identification"],

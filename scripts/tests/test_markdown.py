@@ -29,6 +29,7 @@ class TranscriptFileTests(unittest.TestCase):
             timestamp = 1700000000123456789
             os.utime(path, ns=(timestamp, timestamp))
             path.chmod(0o640)
+            before = path.stat()
             md = TranscriptFile(path)
             value = {"suspected": True, "details": ["---", "red\ngreen", None, 2]}
             self.assertTrue(md.set_scratch("speaker_check", value))
@@ -39,8 +40,8 @@ class TranscriptFileTests(unittest.TestCase):
             self.assertTrue(raw.endswith(b"---\r\n" + BODY))
             self.assertIn(b"# retain this too\r\nspeakers: {}\r\n", raw)
             self.assertEqual(md.read_metadata()["sha256"], "source123")
-            self.assertEqual(path.stat().st_mtime_ns, timestamp)
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
+            self.assertEqual(path.stat().st_mtime_ns, before.st_mtime_ns)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), stat.S_IMODE(before.st_mode))
             self.assertTrue(md.clear_scratch("speaker_check"))
             self.assertFalse(md.clear_scratch("speaker_check"))
             self.assertEqual(md.get_scratch("other_script"), [True, 15])

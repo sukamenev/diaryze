@@ -13,7 +13,7 @@ import threading
 
 from .archive import sha256_file
 from .config import UNTRUNC_TIMEOUT_SEC
-from .processes import run_capture
+from .platform.processes import run_capture
 
 
 # Read the duration of a source that contains an audio stream.
