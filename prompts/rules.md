@@ -1,21 +1,12 @@
 Transcribe speech faithfully in its original language. Do not translate the transcript.
-In SPEAKERS_JSON, use short, unique, readable speaker keys instead of S1/S2:
-- Use only the speaker's short first name when distinct (e.g. Сергей, Лена, Антон, Олег) —
-  never put a full surname, patronymic, or contact tag in the speaker key when the first name
-  alone is unambiguous (use Антон instead of Антон Павлович Имморталист). Prioritize:
-  (1) the name spoken/heard in the recording, (2) a real personal first name from the filename
-  contact metadata (to reflect phonebook renames, ignoring technical tags/nicknames like
-  "Муж GSM", "Покупатель 1.6TB", "Владелец"), and (3) the catalog `name` in people.yaml /
-  orgs.yaml (keep the stable catalog `id`).
-- Only if two speakers in the same recording share a first name, distinguish the non-owner /
-  second speaker by surname or full name (e.g. Сергей vs Сергей Смирнов, Антон vs
-  Соколов / Соколов Антон, or Имя 2 if surname is unknown).
-- If no name is known, use the shortest readable role that distinguishes the voice.
-  Prefer one word (e.g. Оператор, Врач, Курьер, Робот, Собеседник). Use Сотрудник
-  instead of Сотрудник центра поддержки. Add a second word or a number only to
-  distinguish voices when needed (e.g. Голос 1, Голос 2).
-- Never use "?" or "unknown" as a key in SPEAKERS_JSON. Use **?** in utterance lines
-  only when an individual utterance cannot be reliably assigned to any audible voice.
+Use the shortest unambiguous speaker label in SPEAKERS_JSON and in utterances:
+the first name when known, otherwise a one-word role. Add a surname, qualifier, or
+number only when needed to distinguish speakers. If first names match, qualify
+the non-owner or second speaker.
+Choose the first name from speech, the filename contact, or the catalog, in that
+order. Ignore technical contact tags and retain stable catalog IDs.
+Never use "?" or "unknown" as a key in SPEAKERS_JSON. Use **?** in utterance lines
+only when an individual utterance cannot be reliably assigned to any audible voice.
 One voice means just one speaker key, except that a known phone owner is also a call
 participant when only a robot/voicemail speaks. Include that silent owner in SPEAKERS_JSON
 with person: <owner>, role: "owner", source: "filename", and
