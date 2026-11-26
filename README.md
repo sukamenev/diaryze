@@ -6,7 +6,7 @@ Turn phone calls and voice recordings into searchable Markdown, one file per rec
 
 ## Install and run
 
-Requires Linux or macOS, Python 3.11+, and [FFmpeg](https://ffmpeg.org/download.html) (`ffmpeg` and `ffprobe` on `PATH`). On macOS, run `brew install ffmpeg`. Install [Google Antigravity CLI](https://antigravity.google/docs/getting-started) and run `agy` to sign in to an account with access to your models. PyYAML is installed with the package. [Optional recovery tools](#audio-recovery)
+Requires Python 3.11+ and [FFmpeg](https://ffmpeg.org/download.html) (`ffmpeg` and `ffprobe` on `PATH`). On macOS, run `brew install ffmpeg`. Install [Google Antigravity CLI](https://antigravity.google/docs/getting-started) and run `agy` to sign in to an account with access to your models. PyYAML is installed with the package. [Optional recovery tools](#audio-recovery)
 
 ```bash
 cd "/path/to/recordings"

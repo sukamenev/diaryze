@@ -6,7 +6,7 @@
 
 ## Установка и запуск
 
-Нужны Linux или macOS, Python 3.11+ и [FFmpeg](https://ffmpeg.org/download.html) (`ffmpeg` и `ffprobe` в `PATH`). На macOS установите его через `brew install ffmpeg`. Установите [Google Antigravity CLI](https://antigravity.google/docs/getting-started) и запустите `agy`, чтобы войти в аккаунт с доступом к нужным моделям. PyYAML ставится вместе с пакетом. [Необязательные инструменты восстановления](#восстановление-аудио)
+Нужны Python 3.11+ и [FFmpeg](https://ffmpeg.org/download.html) (`ffmpeg` и `ffprobe` в `PATH`). На macOS установите его через `brew install ffmpeg`. Установите [Google Antigravity CLI](https://antigravity.google/docs/getting-started) и запустите `agy`, чтобы войти в аккаунт с доступом к нужным моделям. PyYAML ставится вместе с пакетом. [Необязательные инструменты восстановления](#восстановление-аудио)
 
 ```bash
 cd "/путь/к/записям"
