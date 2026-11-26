@@ -81,12 +81,13 @@ diaryze links speakers using filenames, phone numbers, catalog matches, and spee
 On the first run for phone folders without a known owner's sample, diaryze compares short calls with different contacts inside the selected folder and cuts up to three candidate clips per `.owner` folder. It can find `.owner` in a parent directory up to the archive root. It stops before transcription and prints the files under `00_Diaryze_Data/voice_samples/<person>/phone/candidate/` for listening.
 
 Candidates can contain 5–20 seconds of clean speech from one speaker. Clips of at least 10 seconds are preferred when quality and identity evidence are comparable.
+A separate model request checks each extracted FLAC. If a second voice is heard, diaryze makes one attempt to shorten or shift the cut using up to five seconds of source audio on either side. It checks the new cut again. Only clips judged to contain one speaker reach the candidate folder.
 
 Listen to the clips in `candidate/` and move the best FLAC to the adjacent `confirmed/` folder. Leave its JSON sidecar in `candidate/`. A rerun before approval shows the existing candidates. Once you move a clip, diaryze verifies it, saves its provenance, and continues with transcription. For each call, it uses one reference from the closest date in either direction. A phone clip wins ties. If the call date is unavailable, the most recent dated reference is used.
 
 `--prepare-voice-sample` prepares candidates for the selected folder’s owner without starting a transcription. Add a person ID to select one explicitly. `--approve-voice-sample "path/to/2025-03-14_01.flac"` confirms a clip, and `--reject-voice-sample "path/to/2025-03-14_01.flac"` discards its set.
 
-The review prints instructions when clips are ready. If it cannot prepare any, it prints a short error and the log path. The log in `00_Diaryze_Data/logs/` contains the input paths, per-call reading status and the model's full reply.
+The review prints instructions when clips are ready. If it cannot prepare any, it prints a short error and the log path. The log in `00_Diaryze_Data/logs/` contains the input paths, per-call reading status and the full model replies for selection, verification and any corrections.
 
 `--no-voice-samples` starts transcription without preparing or using samples. `--skip-voice-sample-preflight` starts transcription immediately and uses any approved references available.
 
@@ -119,7 +120,7 @@ python3 /path/to/diaryze/scripts/find.py --root "/path/to/recordings" --folder P
 | [relink_catalog_speakers.py](scripts/relink_catalog_speakers.py) | Match unlinked speakers to existing cards. |
 | [migrate_identification.py](scripts/migrate_identification.py), [migrate_phone_owners.py](scripts/migrate_phone_owners.py), [migrate_catalog_fields.py](scripts/migrate_catalog_fields.py) | Preview transcript migrations. Use `--apply` to write changes. |
 
-Defaults and fallbacks are in [config.py](scripts/diarizer/config.py). Model instructions are in [prompts/](prompts/README.md). Put temporary scripts in the Git-ignored `scripts/local/` directory of the checkout.
+Model and worker defaults, timeouts, and voice sample limits are in [config.py](scripts/diarizer/config.py). Model instructions are in [prompts/](prompts/README.md). Put temporary scripts in the Git-ignored `scripts/local/` directory of the checkout.
 
 From the checkout, `diaryze --selftest` checks tool availability. Run `python3 -m unittest discover -s scripts/tests -q` for offline tests with synthetic audio and mock model responses.
 

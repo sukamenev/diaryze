@@ -13,6 +13,8 @@ This directory holds the English templates used by both the checkout and the ins
 - `owner-*.md`: folder ownership hints (used unless speech suggests someone else is using the phone).
 - `audio-reader.md`: minimal agy agent profile.
 - `voice-reference.md`, `voice-sample.md`: use approved voice references and find review candidates.
+- `voice-sample-check.md`: check that each extracted clip contains one audible speaker.
+- `voice-sample-repair.md`: try a new interval for a clip that contains multiple speakers.
 - `timing-benchmark.md`, `timing-duration.md`: prompts for timestamp benchmark runs.
 
 Responses use SPEAKERS_JSON, SUMMARY_JSON, and timestamped utterances or NO_SPEECH.

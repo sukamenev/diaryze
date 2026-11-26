@@ -44,6 +44,8 @@ def use_archive(root):
 
 # User-adjustable defaults. CLI options override the corresponding values.
 DEFAULT_MODEL = "gemini-4-hydrogen-medium"
+DEFAULT_FALLBACK_MODELS = "gemini-3.8-flash-medium"
+DEFAULT_UI = "en"
 DEFAULT_WORKERS = 5
 BATCH_SHORT_MAX = 5
 BATCH_SHORT_SEC = 300
@@ -53,6 +55,27 @@ OVERLAP_SEC = 15
 REQUEST_TIMEOUT_SEC = 600
 MAX_FILE_ATTEMPTS = 3
 PART_REPAIR_ATTEMPTS = 3
+TRANSCRIPT_TIMECODE_TOLERANCE_MS = 1_000
+
+# Voice sample search, extraction, and verification.
+VOICE_SAMPLE_MIN_MS = 5_000
+VOICE_SAMPLE_MAX_MS = 20_000
+VOICE_SAMPLE_PREFERRED_MS = 10_000
+VOICE_SAMPLE_MIN_SOURCE_MS = 10_000
+VOICE_SAMPLE_MAX_SOURCE_SEC = 180
+VOICE_SAMPLE_MIN_SOURCE_CALLS = 2
+VOICE_SAMPLE_MAX_SOURCE_CALLS = 4
+VOICE_SAMPLE_MAX_CANDIDATES = 3
+VOICE_SAMPLE_REPAIR_CONTEXT_MS = 5_000
+VOICE_SAMPLE_DATE_PROBE_TIMEOUT_SEC = 15
+VOICE_SAMPLE_EXTRACT_TIMEOUT_SEC = 30
+VOICE_SAMPLE_DURATION_TOLERANCE_MS = 100
+
+# Subprocess cleanup and damaged audio recovery.
+AGY_TIMEOUT_GRACE_SEC = 15
+PROCESS_RESULT_GRACE_SEC = 10.0
+PROCESS_TERMINATION_GRACE_SEC = 1.0
+UNTRUNC_TIMEOUT_SEC = 120
 
 # A 503 pauses this model for every worker in the current run.
 MODEL_503_COOLDOWN_S = 300
@@ -147,6 +170,3 @@ UNAVAILABLE_503_PAT = re.compile(
     r'\b503\s+service\s+unavailable\b|\bstatus[:= ]+503\b|\bunavailable\s*\([^)]*503\b)',
     re.I,
 )
-
-
-DEFAULT_FALLBACK_MODELS = "gemini-3.8-flash-medium"

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 
+from .config import PROCESS_RESULT_GRACE_SEC, PROCESS_TERMINATION_GRACE_SEC
 from .runtime import FORCE_STOP_EVENT
 
 
@@ -52,7 +53,7 @@ def _child_groups(parent_pid):
 
 
 # Stop the subprocess and its descendant groups.
-def terminate_tree(proc, grace=1.0):
+def terminate_tree(proc, grace=PROCESS_TERMINATION_GRACE_SEC):
     groups = _child_groups(proc.pid)
 
     # Send a termination signal to each group in the subprocess tree.
@@ -94,7 +95,7 @@ def managed_process(args, **kwargs):
 
 # Capture subprocess output with cancellation, timeout, and completion checks.
 def run_capture(args, *, input=None, timeout=None, finish_when=None,
-                finish_grace=10.0, capture_output=True, text=True, **kwargs):
+                finish_grace=PROCESS_RESULT_GRACE_SEC, capture_output=True, text=True, **kwargs):
     """Like subprocess.run, but no terminal input, and force-stop aware."""
     if not capture_output or not text:
         raise ValueError("run_capture requires captured text output")

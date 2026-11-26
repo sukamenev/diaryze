@@ -12,6 +12,7 @@ import sys
 import threading
 
 from .archive import sha256_file
+from .config import UNTRUNC_TIMEOUT_SEC
 from .processes import run_capture
 
 
@@ -129,7 +130,7 @@ def untrunc_recover(fp: str, tmp_dir: str, untrunc_bin: str | None) -> tuple[str
         try:
             run_capture(
                 [untrunc_bin, "-n", "-s", "-q", "-dst", out_m4a, ref, src_for_untrunc],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True, text=True, timeout=UNTRUNC_TIMEOUT_SEC,
             )
         except subprocess.TimeoutExpired:
             continue

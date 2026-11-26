@@ -103,7 +103,7 @@ def run_agy(prompt: str, model: str, timeout: int, use_custom_agent: bool, conve
 
     try:
         result = run_capture(
-            cmd, input=prompt, timeout=timeout + 15,
+            cmd, input=prompt, timeout=timeout + config.AGY_TIMEOUT_GRACE_SEC,
             finish_when=agy_envelope_complete, env=env, cwd=config.ROOT,
         )
     except subprocess.TimeoutExpired as exc:

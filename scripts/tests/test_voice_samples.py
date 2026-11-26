@@ -14,7 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from diarizer import archive, cli, config, prompts, runtime, voice_samples
+from diarizer import archive, cli, config, diagnostics, prompts, runtime, voice_samples
 
 
 PERSON = "ivanov_aleksey"
@@ -29,6 +29,17 @@ def sample_reply(candidates, *statuses, summary="Reviewed audio"):
                   for number, status in enumerate(statuses, 1)],
         "candidates": candidates,
     }
+
+
+# Wrap a mock voice action response in the agy response envelope.
+def model_result(reply):
+    return 0, json.dumps({"status": "SUCCESS", "result": json.dumps(reply)}), "", None
+
+
+# Build a verification response for several clips in request order.
+def clip_checks(*statuses):
+    return {"clips": [{"clip": number, "status": status, "detail": "Fixture"}
+                      for number, status in enumerate(statuses, 1)]}
 
 
 class VoiceSampleTests(unittest.TestCase):
@@ -147,7 +158,7 @@ class VoiceSampleTests(unittest.TestCase):
         self.assertEqual(output.getvalue(), "")
         log, = config.data_path("logs").glob("diarize-*.jsonl")
         self.assertEqual(errors.getvalue().splitlines(), [
-            "[ERR] The model could read 1 of 2 calls. Comparing voices needs at least two.",
+            "[ERR] The model could read 1 of 2 calls. Comparing voices needs at least 2.",
             f"Details in {log}",
         ])
         rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
@@ -158,6 +169,59 @@ class VoiceSampleTests(unittest.TestCase):
         self.assertEqual(recorded["candidate_count"], 0)
         self.assertEqual(recorded["call_diagnostics"], reply["calls"])
         self.assertEqual(recorded["response"], response)
+
+    # Rescue a shifted interval once and keep rejecting any clip with a second speaker.
+    def test_repairs_rejected_clips_once_before_publishing(self):
+        calls = [{"audio_rel": f"Phone/{n}.wav", "clean_abs": f"/tmp/source-{n}.wav",
+                  "dt": f"2025-05-{10 + n}", "sha256": "fixture",
+                  "direction": "in", "duration_ms": 30_000} for n in range(1, 4)]
+        proposals = [{"call": n, "start_ms": start, "end_ms": start + 6000,
+                      "supporting_calls": [2 if n == 1 else 1], "evidence": "Matching voice"}
+                     for n, start in enumerate((12_000, 6000, 1000), 1)]
+        repair = {"clips": [
+            {"clip": 2, "interval": {"start_ms": 0, "end_ms": 5500}, "detail": "Shortened"},
+            {"clip": 1, "interval": {"start_ms": 2000, "end_ms": 7500}, "detail": "Shifted"},
+        ]}
+        replies = [
+            model_result(sample_reply(proposals, "read", "read", "read")),
+            model_result(clip_checks("multiple_speakers", "single_speaker", "multiple_speakers")),
+            model_result(repair),
+            model_result(clip_checks("single_speaker", "multiple_speakers")),
+        ]
+
+        # Record the exact offsets passed to the extraction step.
+        def extract(call, source, clip):
+            clip.write_text(f"{source['start_ms']}:{source['end_ms']}", encoding="utf-8")
+
+        with (mock.patch.object(voice_samples, "_prepare_calls", return_value=calls),
+              mock.patch.object(voice_samples, "_extract", side_effect=extract),
+              mock.patch.object(voice_samples, "run_agy", side_effect=replies) as provider,
+              diagnostics.run_log() as log):
+            samples = voice_samples.prepare_voice_samples(PERSON, self.phone, self.args)
+        self.assertEqual(provider.call_count, 4)
+        self.assertIn("Find a clean interval", provider.call_args_list[2].args[0])
+        self.assertIn("Check whether each numbered audio clip", provider.call_args_list[3].args[0])
+        self.assertEqual([path.read_text() for path in samples], ["9000:14500", "6000:12000"])
+        shifted = json.loads(samples[0].with_suffix(".json").read_text())
+        self.assertEqual(shifted["source"]["start_ms"], 9000)
+        self.assertEqual(shifted["speaker_check"]["status"], "single_speaker")
+        rows = [json.loads(line) for line in log.read_text().splitlines()]
+        windows = next(row["windows"] for row in rows if row["event"] == "voice_sample_repair_request")
+        self.assertEqual([window["previous_start_ms"] for window in windows], [5000, 1000])
+        results = [row for row in rows if row["event"] == "voice_sample_check_result"]
+        self.assertEqual([row["repaired"] for row in results], [False, True])
+
+    # Refuse incomplete and out-of-range clip decisions.
+    def test_rejects_invalid_clip_reports(self):
+        with self.assertRaisesRegex(ValueError, "one report per voice clip"):
+            voice_samples._parse_clip_check(json.dumps(clip_checks("single_speaker")), 2)
+        with self.assertRaisesRegex(ValueError, "speaker check"):
+            voice_samples._parse_clip_check(json.dumps(clip_checks("maybe")), 1)
+        window = {"duration_ms": 12_000, "previous_start_ms": 1000, "previous_end_ms": 8000}
+        for start, end in ((-1, 7000), (1000, 8000), (0, 4999), (7000, 13_000)):
+            reply = {"clips": [{"clip": 1, "interval": {"start_ms": start, "end_ms": end}, "detail": "Fixture"}]}
+            with self.subTest(start=start, end=end), self.assertRaisesRegex(ValueError, "adjusted"):
+                voice_samples._parse_clip_repairs(json.dumps(reply), [window])
 
     # Check that nested .owner files get independent review sets even for the same person.
     def test_preflight_groups_by_nearest_owner_file(self):
@@ -213,16 +277,17 @@ class VoiceSampleTests(unittest.TestCase):
             for n, duration in enumerate((11_000, 5000, 6500), 1)
         ]
         reply = sample_reply(answer, "read", "read", "read")
-        result = (0, json.dumps({"status": "SUCCESS", "result": json.dumps(reply)}), "", None)
+        results = (model_result(reply), model_result(clip_checks("single_speaker", "single_speaker", "single_speaker")))
 
-        with (mock.patch.object(voice_samples, "run_agy", return_value=result) as provider,
+        with (mock.patch.object(voice_samples, "run_agy", side_effect=results) as provider,
               mock.patch.object(cli, "run_job") as transcribe,
               contextlib.redirect_stdout(io.StringIO()) as output,
               mock.patch.object(cli, "record")):
             self.assertIsNone(cli.run_workers(self.args, log_path=self.root / "quiet.log"))
             self.assertIsNone(cli.run_workers(self.args, log_path=self.root / "quiet.log"))
-            provider.assert_called_once()
-            self.assertIn("Choose 5 to 20 seconds", provider.call_args.args[0])
+            self.assertEqual(provider.call_count, 2)
+            self.assertIn("5 to 20 seconds", provider.call_args_list[0].args[0])
+            self.assertIn("Check whether each numbered audio clip", provider.call_args_list[1].args[0])
             transcribe.assert_not_called()
         candidates = voice_samples.pending_voice_samples(PERSON, scope)
         self.assertEqual(len(candidates), 3)
@@ -240,6 +305,7 @@ class VoiceSampleTests(unittest.TestCase):
         provenance = {path.name: json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
                       for path in candidates}
         self.assertTrue(all(meta["source"]["audio"].startswith("Phone/2021/") for meta in provenance.values()))
+        self.assertTrue(all(meta["speaker_check"]["status"] == "single_speaker" for meta in provenance.values()))
         metadata = provenance[candidates[1].name]
         original = self.root / metadata["source"]["audio"]
         self.assertEqual(metadata["source"]["sha256"], archive.sha256_file(original))

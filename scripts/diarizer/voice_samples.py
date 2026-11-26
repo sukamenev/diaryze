@@ -25,13 +25,8 @@ from .ui import tr
 SAMPLE_NAME = re.compile(r"(\d{4}-\d{2}-\d{2}|undated)_\d{2,}\.flac")
 PERSON_ID = re.compile(r"[a-z0-9][a-z0-9_-]*")
 CHANNELS = ("phone", "recorder")
-MIN_SAMPLE_MS = 5_000
-MAX_SAMPLE_MS = 20_000
-MIN_SOURCE_MS = 10_000
-MAX_SOURCE_SEC = 180
-MAX_SOURCE_CALLS = 4
-MAX_CANDIDATES = 3
 READ_STATUSES = {"read", "unreadable", "not_attempted"}
+CLIP_STATUSES = {"single_speaker", "multiple_speakers", "no_speech", "uncertain", "unreadable"}
 
 
 # Convert a date or timestamp to the recording day in the archive's time zone.
@@ -56,7 +51,7 @@ def _recording_day(item):
         result = run_capture(
             ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
              "format_tags:stream_tags", "-of", "json", path],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=config.VOICE_SAMPLE_DATE_PROBE_TIMEOUT_SEC,
         )
     except InterruptedError:
         raise
@@ -213,19 +208,19 @@ def _prepare_calls(person, source_dir, target_day, temp, args):
         owner_file = waiting[0]["owner_file"]
         waiting = [call for call in waiting if call["owner_file"] == owner_file]
     selected, contacts, directions = [], set(), set()
-    while waiting and len(selected) < MAX_SOURCE_CALLS and not STOP_EVENT.is_set():
+    while waiting and len(selected) < config.VOICE_SAMPLE_MAX_SOURCE_CALLS and not STOP_EVENT.is_set():
         index = next((i for i, call in enumerate(waiting) if call["direction"] not in directions), 0)
         call = waiting.pop(index)
         if call["contact_key"] in contacts:
             continue
         try:
             duration, _ = probe_duration_ms(call["audio_abs"])
-            if duration is None or not MIN_SOURCE_MS <= duration <= MAX_SOURCE_SEC * 1000:
+            if duration is None or not config.VOICE_SAMPLE_MIN_SOURCE_MS <= duration <= config.VOICE_SAMPLE_MAX_SOURCE_SEC * 1000:
                 continue
             folder = temp / "inputs" / str(len(selected) + 1)
             folder.mkdir(parents=True, exist_ok=True)
             item, error = prepare_audio_work(
-                call, str(folder), MAX_SOURCE_SEC, args.chunk_sec, args.overlap_sec,
+                call, str(folder), config.VOICE_SAMPLE_MAX_SOURCE_SEC, args.chunk_sec, args.overlap_sec,
                 untrunc_bin=args.untrunc_bin, use_faad=args.use_faad,
             )
         except InterruptedError:
@@ -250,10 +245,11 @@ def _parse_interval(reply, calls):
     if (any(type(n) is not int for n in (number, start, end))
             or not 1 <= number <= len(calls)
             or not 0 <= start < end <= calls[number - 1]["duration_ms"]
-            or not MIN_SAMPLE_MS <= end - start <= MAX_SAMPLE_MS
+            or not config.VOICE_SAMPLE_MIN_MS <= end - start <= config.VOICE_SAMPLE_MAX_MS
             or not isinstance(evidence, str) or not evidence.strip() or len(evidence) > 500
-            or not isinstance(others, list) or not others
-            or any(type(n) is not int or not 1 <= n <= len(calls) or n == number for n in others)):
+            or not isinstance(others, list)
+            or any(type(n) is not int or not 1 <= n <= len(calls) or n == number for n in others)
+            or len(set(others)) < config.VOICE_SAMPLE_MIN_SOURCE_CALLS - 1):
         raise ValueError(tr("Invalid voice sample bounds or cross-call evidence"))
     call = calls[number - 1]
     return call, {
@@ -266,13 +262,18 @@ def _parse_interval(reply, calls):
     }
 
 
+# Parse a model's JSON response, with or without a surrounding code fence.
+def _json_reply(text):
+    text = text.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+    return json.loads(fenced[1] if fenced else text)
+
+
 # Validate the response and require a diagnostic for every call, even with no candidates.
 def _parse_sample_reply(text, calls):
-    text = text.strip()
-    if not text:
+    if not text.strip():
         raise ValueError(tr("The model returned an empty voice sample response"))
-    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
-    reply = json.loads(fenced[1] if fenced else text)
+    reply = _json_reply(text)
     if not isinstance(reply, dict):
         raise ValueError(tr("Expected a voice sample report with a summary, calls, and candidates"))
     summary, reports, entries = reply.get("summary"), reply.get("calls"), reply.get("candidates")
@@ -295,10 +296,16 @@ def _parse_sample_reply(text, calls):
     return summary.strip(), reports, _parse_candidates(entries, calls, by_number)
 
 
+# Compare two intervals in the same original recording.
+def _source_intervals_overlap(left, right):
+    return (left["audio"] == right["audio"]
+            and max(left["start_ms"], right["start_ms"]) < min(left["end_ms"], right["end_ms"]))
+
+
 # Validate candidate intervals, corroboration, and overlap using the per-call report.
 def _parse_candidates(entries, calls, reports):
-    if not isinstance(entries, list) or len(entries) > MAX_CANDIDATES:
-        raise ValueError(tr("Expected up to three voice sample candidates"))
+    if not isinstance(entries, list) or len(entries) > config.VOICE_SAMPLE_MAX_CANDIDATES:
+        raise ValueError(tr("Expected up to {count} voice sample candidates", count=config.VOICE_SAMPLE_MAX_CANDIDATES))
     candidates = []
     for entry in entries:
         call, metadata = _parse_interval(entry, calls)
@@ -306,33 +313,47 @@ def _parse_candidates(entries, calls, reports):
         if any(reports[number]["read_status"] != "read" for number in cited):
             raise ValueError(tr("A candidate cited a call without readable audio"))
         current = metadata["source"]
-        if any(prior["audio"] == current["audio"] and
-               max(prior["start_ms"], current["start_ms"]) < min(prior["end_ms"], current["end_ms"])
-               for prior in (previous["source"] for _, previous in candidates)):
+        if any(_source_intervals_overlap(previous["source"], current) for _, previous in candidates):
             raise ValueError(tr("Voice sample candidates overlap"))
         candidates.append((call, metadata))
     return candidates
 
 
+# Run one independent audio request and clean up its completed session.
+def _request_voice_reply(prompt, args):
+    rc, stdout, stderr, home = run_agy(prompt, args.model, args.timeout, not args.no_custom_agent)
+    # Structured diagnostics can mention safety without indicating a provider failure.
+    error, text, usage, conversation = extract_envelope_error_and_usage(rc, stdout, stderr, detect_safety=False)
+    try:
+        if error:
+            raise ValueError(error[:500])
+        return text, usage
+    finally:
+        agy_forget(home, conversation)
+
+
+# Choose the language for model diagnostics shown in the archive's logs.
+def _diagnostic_language(args):
+    return "Russian" if getattr(args, "ui", config.DEFAULT_UI) == "ru" else "English"
+
+
 # Ask for several clips using the same comparative listening session.
 def _request_candidates(person, calls, args):
+    minimum_calls = config.VOICE_SAMPLE_MIN_SOURCE_CALLS
     inputs = [{"call": n, "file": item["clean_abs"], "direction": item["direction"],
                "duration_ms": item["duration_ms"]} for n, item in enumerate(calls, 1)]
     prompt = load_prompt(
         "voice-sample.md", person=person,
         calls=json.dumps(inputs, ensure_ascii=False),
-        diagnostic_language="Russian" if getattr(args, "ui", "en") == "ru" else "English",
-        min_seconds=MIN_SAMPLE_MS // 1000, max_seconds=MAX_SAMPLE_MS // 1000,
+        diagnostic_language=_diagnostic_language(args),
+        min_seconds=f"{config.VOICE_SAMPLE_MIN_MS / 1000:g}", max_seconds=f"{config.VOICE_SAMPLE_MAX_MS / 1000:g}",
+        preferred_seconds=f"{config.VOICE_SAMPLE_PREFERRED_MS / 1000:g}", min_calls=minimum_calls,
+        max_candidates=config.VOICE_SAMPLE_MAX_CANDIDATES,
     )
     record("voice_sample_request", items=calls, person=person, model=args.model, calls=inputs)
-    home = conversation = None
     text = ""
     try:
-        rc, stdout, stderr, home = run_agy(prompt, args.model, args.timeout, not args.no_custom_agent)
-        # A successful structured report may mention safety in a per-call diagnostic.
-        error, text, usage, conversation = extract_envelope_error_and_usage(rc, stdout, stderr, detect_safety=False)
-        if error:
-            raise ValueError(error[:500])
+        text, usage = _request_voice_reply(prompt, args)
         try:
             summary, reports, candidates = _parse_sample_reply(text, calls)
         except (TypeError, ValueError) as exc:
@@ -342,15 +363,136 @@ def _request_candidates(person, calls, args):
     except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
         record("voice_sample_request_error", items=calls, person=person, model=args.model, response=text, error=exc)
         raise
-    finally:
-        agy_forget(home, conversation)
     if not candidates and not STOP_EVENT.is_set():
         readable = sum(report["read_status"] == "read" for report in reports)
-        if readable < 2:
-            raise ValueError(tr("The model could read {count} of {total} calls. Comparing voices needs at least two.",
-                                count=readable, total=len(calls)))
+        if readable < minimum_calls:
+            raise ValueError(tr("The model could read {count} of {total} calls. Comparing voices needs at least {required}.",
+                                count=readable, total=len(calls), required=minimum_calls))
         raise ValueError(tr("No suitable voice clip found in the reviewed calls."))
     return candidates
+
+
+# Require one uniquely numbered report per clip.
+def _parse_clip_reports(text, count):
+    reply = _json_reply(text)
+    entries = reply.get("clips") if isinstance(reply, dict) else None
+    if not isinstance(entries, list) or len(entries) != count:
+        raise ValueError(tr("Expected one report per voice clip"))
+    reports = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(tr("Invalid voice clip report"))
+        number, detail = entry.get("clip"), entry.get("detail")
+        if (type(number) is not int or not 1 <= number <= count or number in reports
+                or not isinstance(detail, str) or not detail.strip() or len(detail) > 500):
+            raise ValueError(tr("Invalid voice clip report"))
+        reports[number] = dict(entry, detail=detail.strip())
+    return [reports[number] for number in range(1, count + 1)]
+
+
+# Validate the statuses before accepting the model's speaker counts.
+def _parse_clip_check(text, count):
+    reports = _parse_clip_reports(text, count)
+    for report in reports:
+        status = report.get("status")
+        if not isinstance(status, str) or status not in CLIP_STATUSES:
+            raise ValueError(tr("Invalid speaker check result"))
+    return reports
+
+
+# Check the extracted clips in a fresh session before publishing any candidates.
+def _check_voice_clips(person, clips, args, *, repaired=False):
+    inputs = [{"clip": number, "file": str(path)} for number, path in enumerate(clips, 1)]
+    items = [{"audio_rel": metadata["source"]["audio"]} for metadata in clips.values()]
+    prompt = load_prompt("voice-sample-check.md", clips=json.dumps(inputs, ensure_ascii=False),
+                         diagnostic_language=_diagnostic_language(args))
+    record("voice_sample_check_request", items=items, person=person, model=args.model, clips=inputs, repaired=repaired)
+    text = ""
+    try:
+        text, usage = _request_voice_reply(prompt, args)
+        try:
+            reports = _parse_clip_check(text, len(clips))
+        except ValueError as exc:
+            raise ValueError(tr("Invalid voice clip verification response: {error}", error=exc)) from exc
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        record("voice_sample_check_error", items=items, person=person, model=args.model,
+               repaired=repaired, response=text, error=exc)
+        raise
+    record("voice_sample_check_result", items=items, person=person, model=args.model, clips=reports,
+           repaired=repaired, response=text, usage=usage)
+    return reports
+
+
+# Validate local repair offsets against the exact window sent to the model.
+def _parse_clip_repairs(text, windows):
+    reports = _parse_clip_reports(text, len(windows))
+    for report, window in zip(reports, windows, strict=True):
+        interval = report.get("interval", ...)
+        if interval is None:
+            continue
+        if not isinstance(interval, dict):
+            raise ValueError(tr("Invalid adjusted voice clip interval"))
+        start, end = interval.get("start_ms"), interval.get("end_ms")
+        if (type(start) is not int or type(end) is not int
+                or not 0 <= start < end <= window["duration_ms"]
+                or not config.VOICE_SAMPLE_MIN_MS <= end - start <= config.VOICE_SAMPLE_MAX_MS
+                or (start, end) == (window["previous_start_ms"], window["previous_end_ms"])):
+            raise ValueError(tr("Invalid adjusted voice clip interval"))
+    return reports
+
+
+# Find adjusted intervals using short windows around the rejected cuts.
+def _repair_voice_clips(person, clips, calls, reference, args):
+    calls_by_path = {call["audio_rel"]: call for call in calls}
+    items = [{"audio_rel": metadata["source"]["audio"]} for metadata in clips.values()]
+    text = ""
+    try:
+        with tempfile.TemporaryDirectory(prefix="diaryze-voice-repair-") as temporary:
+            windows = []
+            for number, metadata in enumerate(clips.values(), 1):
+                source = metadata["source"]
+                call = calls_by_path[source["audio"]]
+                start = max(0, source["start_ms"] - config.VOICE_SAMPLE_REPAIR_CONTEXT_MS)
+                end = min(call["duration_ms"], source["end_ms"] + config.VOICE_SAMPLE_REPAIR_CONTEXT_MS)
+                window_file = Path(temporary) / f"{number}.flac"
+                _extract(call, dict(source, start_ms=start, end_ms=end), window_file)
+                windows.append({"clip": number, "file": str(window_file), "duration_ms": end - start,
+                                "previous_start_ms": source["start_ms"] - start,
+                                "previous_end_ms": source["end_ms"] - start,
+                                "direction": call["direction"], "owner_evidence": metadata["evidence"]})
+            prompt = load_prompt(
+                "voice-sample-repair.md", person=person, windows=json.dumps(windows, ensure_ascii=False),
+                reference=json.dumps(str(reference) if reference else None, ensure_ascii=False),
+                diagnostic_language=_diagnostic_language(args),
+                min_seconds=f"{config.VOICE_SAMPLE_MIN_MS / 1000:g}", max_seconds=f"{config.VOICE_SAMPLE_MAX_MS / 1000:g}",
+            )
+            if STOP_EVENT.is_set():
+                return {}
+            record("voice_sample_repair_request", items=items, person=person, model=args.model, windows=windows,
+                   reference=str(reference) if reference else None)
+            text, usage = _request_voice_reply(prompt, args)
+            reports = _parse_clip_repairs(text, windows)
+            record("voice_sample_repair_result", items=items, person=person, model=args.model,
+                   clips=reports, response=text, usage=usage)
+            if STOP_EVENT.is_set():
+                return {}
+            repaired = {}
+            for (clip, metadata), report, window in zip(clips.items(), reports, windows, strict=True):
+                interval = report["interval"]
+                if interval is None:
+                    continue
+                source = metadata["source"]
+                window_start = source["start_ms"] - window["previous_start_ms"]
+                adjusted = dict(source, start_ms=window_start + interval["start_ms"],
+                                end_ms=window_start + interval["end_ms"])
+                _extract(calls_by_path[source["audio"]], adjusted, clip)
+                repaired[clip] = dict(metadata, source=adjusted, sha256=sha256_file(clip))
+            return repaired
+    except InterruptedError:
+        raise
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        record("voice_sample_repair_error", items=items, person=person, model=args.model, response=text, error=exc)
+        return {}
 
 
 # Extract a clean standalone FLAC and confirm that decoding produced the selected span.
@@ -362,12 +504,12 @@ def _extract(call, source, clip):
         ["ffmpeg", "-y", "-v", "error", "-xerror", "-ss", f"{source['start_ms'] / 1000:.3f}",
          "-i", call["clean_abs"], "-t", f"{span / 1000:.3f}", "-map", "0:a:0",
          "-map_metadata", "-1", "-c:a", "flac", str(clip)],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=config.VOICE_SAMPLE_EXTRACT_TIMEOUT_SEC,
     )
     if result.returncode:
         raise ValueError(tr("Cannot extract voice sample: {error}", error=result.stderr.strip()[:300]))
     actual, error = probe_duration_ms(str(clip))
-    if error or abs(actual - span) > 100:
+    if error or abs(actual - span) > config.VOICE_SAMPLE_DURATION_TOLERANCE_MS:
         raise ValueError(tr("Unexpected voice sample duration: {duration}", duration=error or actual))
 
 
@@ -425,7 +567,7 @@ def _next_sample_name(stamp, *folders):
         sequence += 1
 
 
-# Cut a complete set before making its clips available for review.
+# Cut and screen the clips before making the surviving set available for review.
 def prepare_voice_samples(person, source_dir, args, *, target_item=None):
     channel = "phone"
     folder = _channel_dir(person, channel)
@@ -447,23 +589,64 @@ def prepare_voice_samples(person, source_dir, args, *, target_item=None):
             calls = _prepare_calls(person, source_dir, target_day, Path(inputs), args)
             if STOP_EVENT.is_set():
                 return []
-            if len(calls) < 2:
-                record("voice_sample_insufficient_calls", items=calls, person=person, folder=scope, required=2)
-                raise ValueError(tr("Prepared {count} calls. Voice comparison needs two readable calls with different contacts.",
-                                    count=len(calls)))
+            minimum_calls = config.VOICE_SAMPLE_MIN_SOURCE_CALLS
+            if len(calls) < minimum_calls:
+                record("voice_sample_insufficient_calls", items=calls, person=person, folder=scope,
+                       required=minimum_calls)
+                raise ValueError(tr("Prepared {count} calls. Voice comparison needs {required} readable calls with different contacts.",
+                                    count=len(calls), required=minimum_calls))
             candidates = _request_candidates(person, calls, args)
             if STOP_EVENT.is_set():
                 return []
             staged = Path(temporary)
+            clips = {}
             for call, metadata in candidates:
                 name = _next_sample_name(metadata["recorded_on"], candidate, confirmed, staged, folder)
                 clip = staged / name
                 _extract(call, metadata["source"], clip)
                 metadata.update(person=person, channel=channel, scope=scope, model=args.model,
                                 sha256=sha256_file(clip))
+                clips[clip] = metadata
+            checks = dict(zip(clips, _check_voice_clips(person, clips, args), strict=True))
+            if STOP_EVENT.is_set():
+                return []
+            rejected = {clip: clips[clip] for clip, report in checks.items() if report["status"] == "multiple_speakers"}
+            repaired = {}
+            if rejected:
+                reference = next((clip for clip, report in checks.items() if report["status"] == "single_speaker"), None)
+                repaired = _repair_voice_clips(person, rejected, calls, reference, args)
+                if repaired and not STOP_EVENT.is_set():
+                    try:
+                        reports = _check_voice_clips(person, repaired, args, repaired=True)
+                    except InterruptedError:
+                        raise
+                    except (OSError, ValueError, subprocess.TimeoutExpired):
+                        # The verification error is logged. Keep the original passing clips.
+                        pass
+                    else:
+                        clips.update(repaired)
+                        checks.update(zip(repaired, reports, strict=True))
+            if STOP_EVENT.is_set():
+                return []
+            passed = []
+            for clip in sorted(checks, key=lambda path: path in repaired):
+                report = checks[clip]
+                if report["status"] != "single_speaker":
+                    continue
+                metadata = clips[clip]
+                if any(_source_intervals_overlap(metadata["source"], clips[other]["source"]) for other in passed):
+                    record("voice_sample_repair_overlap", items=[{"audio_rel": metadata["source"]["audio"]}],
+                           person=person, clip=clip.name)
+                    continue
+                if sha256_file(clip) != metadata["sha256"]:
+                    raise ValueError(tr("The selected sample or its metadata changed: {path}", path=clip))
+                metadata["speaker_check"] = {"model": args.model, "status": report["status"], "detail": report["detail"]}
                 clip.with_suffix(".json").write_text(
                     json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            for clip in sorted(staged.glob("*.flac")):
+                passed.append(clip)
+            if not passed:
+                raise ValueError(tr("No clip passed the single-speaker check."))
+            for clip in passed:
                 metadata = clip.with_suffix(".json")
                 metadata.replace(candidate / metadata.name)
                 clip.replace(candidate / clip.name)

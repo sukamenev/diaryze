@@ -3,9 +3,11 @@
 import argparse
 from contextlib import contextmanager
 
+from .config import DEFAULT_UI
+
 
 LANGUAGES = ("en", "ru")
-_language = "en"
+_language = DEFAULT_UI
 
 _RUSSIAN = {
     # Argument parser
@@ -31,7 +33,7 @@ _RUSSIAN = {
     "one of the arguments %s is required": "требуется один из аргументов %s",
     # Command help
     "Parallel agy audio diarizer": "Параллельная расшифровка и диаризация аудио через agy",
-    "Interface language (default: en)": "Язык интерфейса (по умолчанию en)",
+    "Interface language (default: {default})": "Язык интерфейса (по умолчанию {default})",
     "Archive root (default: current directory)": "Корень архива (по умолчанию текущая папка)",
     "Folder to scan within the archive (default: the whole archive)": "Папка внутри архива (по умолчанию весь архив)",
     "Create empty local catalogs and exit": "Создать пустые справочники и выйти",
@@ -61,8 +63,8 @@ _RUSSIAN = {
         "Максимум попыток обработки неизменившегося файла за запуск (по умолчанию %(default)s)",
     "List pending queue without running agy": "Показать очередь без запуска agy",
     "Run internal parser/validator/recovery self-test": "Проверить разбор, валидацию и восстановление аудио",
-    "Find up to three samples for the folder owner, or specify a person ID":
-        "Подготовить до трёх образцов для владельца папки или явно указанного человека",
+    "Find up to {count} samples for the folder owner, or specify a person ID":
+        "Подготовить до {count} образцов для владельца папки или явно указанного человека",
     "Approve one candidate and clear its review set": "Подтвердить кандидата и очистить его набор",
     "Discard a pending set by candidate FLAC or folder": "Отклонить набор, указав FLAC или папку кандидатов",
     "Transcribe without preparing or using any voice samples": "Расшифровать без подготовки и использования образцов голоса",
@@ -89,11 +91,11 @@ _RUSSIAN = {
     "Details in {path}": "Подробности в {path}",
     "Selected clips are in {folder}. Start transcription to validate them.":
         "Выбранные клипы уже в {folder}. Запустите расшифровку, чтобы подтвердить их.",
-    "The model could read {count} of {total} calls. Comparing voices needs at least two.":
-        "Модель прочитала {count} из {total} звонков. Для сравнения голоса нужны хотя бы два.",
+    "The model could read {count} of {total} calls. Comparing voices needs at least {required}.":
+        "Модель прочитала {count} из {total} звонков. Минимум для сравнения голоса — {required}.",
     "No suitable voice clip found in the reviewed calls.": "В проверенных звонках не найден подходящий образец голоса.",
-    "Prepared {count} calls. Voice comparison needs two readable calls with different contacts.":
-        "Подготовлено звонков: {count}. Для сравнения голоса нужны два читаемых звонка с разными контактами.",
+    "Prepared {count} calls. Voice comparison needs {required} readable calls with different contacts.":
+        "Подготовлено звонков: {count}. Для сравнения нужны читаемые звонки от разных контактов (минимум {required}).",
     "The model returned an empty voice sample response": "Модель вернула пустой ответ на запрос образцов",
     "Expected a voice sample report with a summary, calls, and candidates":
         "Ожидался отчёт об образцах с полями summary, calls и candidates",
@@ -102,13 +104,19 @@ _RUSSIAN = {
     "Invalid source call diagnostic": "Некорректный отчёт об исходном звонке",
     "A candidate cited a call without readable audio": "Кандидат ссылается на звонок без доступного аудио",
     "Invalid voice sample response: {error}": "Некорректный ответ при подборе образцов: {error}",
+    "Expected one report per voice clip": "Ожидался один отчёт по каждому клипу",
+    "Invalid voice clip report": "Некорректный отчёт по клипу",
+    "Invalid speaker check result": "Некорректный результат проверки числа говорящих",
+    "Invalid voice clip verification response: {error}": "Некорректный ответ при проверке клипов: {error}",
+    "No clip passed the single-speaker check.": "Ни один клип не прошёл проверку на одного говорящего.",
+    "Invalid adjusted voice clip interval": "Некорректные границы исправленного клипа",
     "Invalid voice sample person ID": "Недопустимый ID владельца образца",
     "Invalid voice sample channel": "Недопустимый тип записи для образца",
     "Voice sample channel cannot use a symbolic link: {path}": "Папка типа записи не может быть симлинком: {path}",
     "Voice sample review cannot use a symbolic link: {path}": "Папка проверки образцов не может быть симлинком: {path}",
     "Expected a voice sample object or null": "Ожидался объект с образцом или null",
     "Invalid voice sample bounds or cross-call evidence": "Некорректные границы клипа или подтверждение по другим звонкам",
-    "Expected up to three voice sample candidates": "Ожидалось до трёх голосовых кандидатов",
+    "Expected up to {count} voice sample candidates": "Ожидалось до {count} образцов-кандидатов",
     "Voice sample candidates overlap": "Голосовые кандидаты пересекаются во времени",
     "Voice sample source changed during preparation: {path}": "Исходник образца изменился при подготовке: {path}",
     "Cannot extract voice sample: {error}": "Не удалось вырезать образец: {error}",

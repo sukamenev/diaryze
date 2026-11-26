@@ -40,9 +40,9 @@ VOICE_SAMPLE_ERRORS = (OSError, ValueError, subprocess.TimeoutExpired, yaml.YAML
 # Select the interface language before parsing the full command line.
 def main():
     selector = argparse.ArgumentParser(add_help=False)
-    selector.add_argument("--ui", nargs="?", default="en")
+    selector.add_argument("--ui", nargs="?", default=config.DEFAULT_UI)
     selected, _ = selector.parse_known_args()
-    language = selected.ui if selected.ui in LANGUAGES else "en"
+    language = selected.ui if selected.ui in LANGUAGES else config.DEFAULT_UI
     with use_ui(language):
         with argparse_ui():
             parser, args = _parse_args()
@@ -52,7 +52,8 @@ def main():
 # Parse the command-line options in the selected interface language.
 def _parse_args():
     ap = argparse.ArgumentParser(description=tr("Parallel agy audio diarizer"))
-    ap.add_argument("--ui", choices=LANGUAGES, default="en", help=tr("Interface language (default: en)"))
+    ap.add_argument("--ui", choices=LANGUAGES, default=config.DEFAULT_UI,
+                    help=tr("Interface language (default: {default})", default=config.DEFAULT_UI))
     ap.add_argument("--root", default=".", help=tr("Archive root (default: current directory)"))
     ap.add_argument("--folder", "--subdir", dest="subdir", default=".", metavar="PATH",
                     help=tr("Folder to scan within the archive (default: the whole archive)"))
@@ -85,7 +86,8 @@ def _parse_args():
     ap.add_argument("--selftest", action="store_true", help=tr("Run internal parser/validator/recovery self-test"))
     voice = ap.add_mutually_exclusive_group()
     voice.add_argument("--prepare-voice-sample", nargs="?", const=True, metavar="PERSON",
-                       help=tr("Find up to three samples for the folder owner, or specify a person ID"))
+                       help=tr("Find up to {count} samples for the folder owner, or specify a person ID",
+                               count=config.VOICE_SAMPLE_MAX_CANDIDATES))
     voice.add_argument("--approve-voice-sample", metavar="FILE", help=tr("Approve one candidate and clear its review set"))
     voice.add_argument("--reject-voice-sample", metavar="PATH", help=tr("Discard a pending set by candidate FLAC or folder"))
     voice.add_argument("--no-voice-samples", action="store_true",

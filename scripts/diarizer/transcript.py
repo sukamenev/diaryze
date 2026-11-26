@@ -205,6 +205,7 @@ def validate_and_render_md(
     clamped_over = 0
     reordered = 0
     body_lines = []
+    tolerance = config.TRANSCRIPT_TIMECODE_TOLERANCE_MS
     for ms, sp, text in lines:
         sp = remap.get(sp.strip(), sp.strip())
         if sp in {"?", "unknown"}:
@@ -213,9 +214,9 @@ def validate_and_render_md(
             if not salvage:
                 raise ValueError(f"undeclared speaker: {sp}")
             speakers[sp] = {"person": None, "label": sp}
-        if ms > dur + 1000:
+        if ms > dur + tolerance:
             if not salvage:
-                raise ValueError(f"timestamp {ms} > duration_ms+1000 ({dur+1000})")
+                raise ValueError(f"timestamp {ms} > duration_ms+{tolerance} ({dur + tolerance})")
             clamped_over += 1
         clamped = dur if ms > dur else max(0, ms)
         if clamped < prev_ms:
